@@ -10,7 +10,7 @@ Aplikasi koordinasi perawatan pasien untuk administrator, perawat, dan keluarga.
 - Manajemen pengguna: tambah, edit, ganti kata sandi/peran, tautkan pasien keluarga, nonaktifkan, dan aktifkan kembali.
 - Jadwal obat: tambah, edit, ubah status diberikan/menunggu, dan hapus (admin).
 - Kunjungan dan pantauan kondisi: tambah, edit data milik sendiri (atau seluruh data oleh admin), hapus (admin).
-- Pesan: kirim, edit/hapus pesan milik sendiri; admin dapat mengelola semua pesan.
+- Pesan: kirim pesan baru, balas pesan tertentu dengan kutipan konteks, tampilkan riwayat percakapan kronologis, edit/hapus pesan milik sendiri; admin dapat mengelola semua pesan.
 - Laporan: tambah, edit laporan sendiri; admin dapat mengelola dan menghapus semua laporan.
 - Riwayat aktivitas admin untuk mencatat login, tambah, perubahan, arsip, status, dan penghapusan.
 - Validasi server, PDO prepared statements, CSRF token, password hashing, session cookie HttpOnly/SameSite.
@@ -33,6 +33,9 @@ Aplikasi koordinasi perawatan pasien untuk administrator, perawat, dan keluarga.
 
 ## Upgrade dari database versi awal
 Jika database versi awal sudah berisi tabel users, patients, medications, visits, observations, messages, dan reports, jangan impor ulang rawat_bersama.sql. Backup database, lalu jalankan satu kali database/migrations/001_access_control_and_audit.sql melalui phpMyAdmin. Migrasi menambahkan status arsip pasien, relasi keluarga-pasien, dan audit log.
+
+## Upgrade fitur balasan pesan
+Jika database sudah menjalankan migrasi 001, backup database lalu jalankan `database/migrations/002_message_replies.sql` satu kali melalui phpMyAdmin. Migrasi ini menambahkan relasi balasan pada tabel `messages` tanpa menghapus pesan lama. Untuk instalasi baru, kolom balasan sudah termasuk dalam `database/rawat_bersama.sql`.
 
 ## Hak akses
 - **Admin:** semua pasien, pengguna, audit log, seluruh CRUD, pengarsipan dan pemulihan.
