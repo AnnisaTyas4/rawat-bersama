@@ -187,9 +187,10 @@ tbody tr:hover{background:#f8fbfb}
  .topbar h2{font-size:14px}
  .topbar .eyebrow{font-size:8px;letter-spacing:1px}
  .top-actions{margin-left:auto;gap:7px}
- .global-search{width:38px;padding:3px;justify-content:center;background:transparent;border-color:transparent}
- .global-search input{position:absolute;left:-9999px;width:1px;height:1px}
- .global-search button{width:34px;height:34px;flex-basis:34px}
+ .global-search{width:clamp(112px,34vw,185px);padding:3px 4px 3px 8px;gap:3px;background:#f8fbfb;border-color:#e1e9ec}
+ .global-search input{position:static;left:auto;width:100%;height:auto;padding:7px 1px;font-size:10px}
+ .global-search input::placeholder{font-size:9px}
+ .global-search button{width:30px;height:30px;flex-basis:30px;font-size:18px}
  .content{padding:20px 13px 18px}
  .welcome-row h1,.page-intro h1{font-size:22px}
  .stat-grid{gap:10px}
