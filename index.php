@@ -123,7 +123,7 @@ if ($me) {
     } elseif ($page === 'observations') {
         $observations = scoped_rows('SELECT o.*,p.name AS patient,u.name AS recorder FROM observations o INNER JOIN patients p ON p.id=o.patient_id INNER JOIN users u ON u.id=o.recorded_by','o.patient_id','ORDER BY o.recorded_at DESC,o.id DESC');
     } elseif ($page === 'messages') {
-        $messages = scoped_rows('SELECT m.*,p.name AS patient,u.name AS sender FROM messages m INNER JOIN patients p ON p.id=m.patient_id INNER JOIN users u ON u.id=m.sender_id','m.patient_id','ORDER BY m.created_at DESC,m.id DESC LIMIT 200');
+        $messages = array_reverse(scoped_rows('SELECT m.*,p.name AS patient,u.name AS sender,u.role AS sender_role,pm.message AS reply_message,pu.name AS reply_sender,pu.role AS reply_sender_role FROM messages m INNER JOIN patients p ON p.id=m.patient_id INNER JOIN users u ON u.id=m.sender_id LEFT JOIN messages pm ON pm.id=m.reply_to_id LEFT JOIN users pu ON pu.id=pm.sender_id','m.patient_id','ORDER BY m.created_at DESC,m.id DESC LIMIT 200'));
     } elseif ($page === 'reports') {
         $reports = scoped_rows('SELECT r.*,p.name AS patient,u.name AS author FROM reports r INNER JOIN patients p ON p.id=r.patient_id INNER JOIN users u ON u.id=r.author_id','r.patient_id','ORDER BY r.report_date DESC,r.id DESC');
     } elseif ($page === 'audit' && $role === 'admin') {
@@ -290,13 +290,69 @@ if ($role === 'admin') {
                 </tbody></table></div><?php if (!$observations): ?><p class="empty">Belum ada data pantauan.</p><?php endif; ?></div>
 
             <?php elseif ($page === 'messages'): ?>
-                <?php page_heading('Pesan perawatan','Komunikasi keluarga dan tim perawat berdasarkan pasien yang terhubung.'); ?>
-                <?php if ($activePatients): ?><details class="panel-card form-disclosure" open><summary class="btn btn-primary">＋ Tulis pesan</summary><form method="post" class="form-panel"><?=form_hidden('save_message','messages')?><div class="form-grid"><label>Pasien<select name="patient_id"><?=patient_select_options($activePatients)?></select></label><label class="span-2">Pesan<textarea name="message" rows="3" maxlength="5000" required></textarea></label></div><button class="btn btn-primary" type="submit">Kirim pesan</button></form></details><?php else: ?><div class="panel-card empty">Tidak ada pasien yang terhubung. Hubungi administrator untuk mendapatkan akses.</div><?php endif; ?>
-                <div class="panel-card"><div class="panel-head"><h3>Pesan terbaru</h3><span class="tag"><?=count($messages)?> pesan</span></div>
-                    <?php foreach ($messages as $message): $canEdit = $role==='admin' || (int)$message['sender_id']===(int)$me['id']; ?><div class="message-item"><div class="message-meta"><b><?=e($message['sender'])?></b><span class="tag"><?=e($message['patient'])?></span><small><?=e($message['created_at'])?></small></div><p><?=nl2br(e($message['message']))?></p>
-                        <?php if ($canEdit): ?><div class="actions-cell"><details class="row-details"><summary class="btn btn-sm">Edit</summary><form method="post" class="form-panel row-form"><?=form_hidden('save_message','messages')?><input type="hidden" name="id" value="<?=e($message['id'])?>"><label>Pasien<select name="patient_id"><?=patient_select_options($activePatients,(int)$message['patient_id'])?></select></label><label>Pesan<textarea name="message" rows="3" maxlength="5000" required><?=e($message['message'])?></textarea></label><button class="btn btn-primary" type="submit">Simpan perubahan</button></form></details><form method="post" class="inline-action" onsubmit="return confirm('Hapus pesan ini?')"><?=form_hidden('delete_message','messages')?><input type="hidden" name="id" value="<?=e($message['id'])?>"><button class="btn btn-sm btn-danger" type="submit">Hapus</button></form></div><?php endif; ?>
-                    </div><?php endforeach; ?>
-                    <?php if (!$messages): ?><p class="empty">Belum ada pesan.</p><?php endif; ?>
+                <?php page_heading('Percakapan perawatan','Kirim pesan baru atau balas pesan keluarga dan tim perawat.'); ?>
+                <?php if ($activePatients): ?>
+                    <details class="panel-card form-disclosure" open>
+                        <summary class="btn btn-primary">＋ Tulis pesan baru</summary>
+                        <form method="post" class="form-panel">
+                            <?=form_hidden('save_message','messages')?>
+                            <div class="form-grid">
+                                <label>Pasien<select name="patient_id" required><?=patient_select_options($activePatients)?></select></label>
+                                <label class="span-2">Pesan<textarea name="message" rows="3" maxlength="5000" placeholder="Tulis pesan untuk keluarga atau tim perawat..." required></textarea></label>
+                            </div>
+                            <button class="btn btn-primary" type="submit">Kirim pesan</button>
+                        </form>
+                    </details>
+                <?php else: ?>
+                    <div class="panel-card empty">Tidak ada pasien yang terhubung. Hubungi administrator untuk mendapatkan akses.</div>
+                <?php endif; ?>
+                <div class="panel-card conversation-card">
+                    <div class="panel-head"><div><h3>Riwayat percakapan</h3><small class="field-help">Pesan ditampilkan dari yang paling lama ke terbaru.</small></div><span class="tag"><?=count($messages)?> pesan</span></div>
+                    <?php foreach ($messages as $message): $canEdit = $role==='admin' || (int)$message['sender_id']===(int)$me['id']; ?>
+                        <article class="message-item">
+                            <div class="message-meta">
+                                <b><?=e($message['sender'])?></b>
+                                <span class="tag"><?=e($message['patient'])?></span>
+                                <span class="sender-role"><?=e(ucfirst($message['sender_role']))?></span>
+                                <small><?=e($message['created_at'])?></small>
+                            </div>
+                            <?php if (!empty($message['reply_to_id']) && $message['reply_message'] !== null): ?>
+                                <div class="reply-quote">
+                                    <div class="reply-quote-label">↪ Membalas <?=e($message['reply_sender'] ?: 'pesan sebelumnya')?> · <?=e(ucfirst($message['reply_sender_role'] ?? ''))?></div>
+                                    <p><?=nl2br(e($message['reply_message']))?></p>
+                                </div>
+                            <?php endif; ?>
+                            <p class="message-text"><?=nl2br(e($message['message']))?></p>
+                            <div class="message-actions">
+                                <details class="row-details reply-details">
+                                    <summary class="btn btn-sm">↩ Balas</summary>
+                                    <form method="post" class="form-panel row-form">
+                                        <?=form_hidden('save_message','messages')?>
+                                        <input type="hidden" name="reply_to_id" value="<?=e($message['id'])?>">
+                                        <label>Balasan untuk <?=e($message['sender'])?><textarea name="message" rows="3" maxlength="5000" placeholder="Tulis balasan..." required></textarea></label>
+                                        <button class="btn btn-primary" type="submit">Kirim balasan</button>
+                                    </form>
+                                </details>
+                                <?php if ($canEdit): ?>
+                                    <details class="row-details">
+                                        <summary class="btn btn-sm">Edit</summary>
+                                        <form method="post" class="form-panel row-form">
+                                            <?=form_hidden('save_message','messages')?>
+                                            <input type="hidden" name="id" value="<?=e($message['id'])?>">
+                                            <label>Edit pesan<textarea name="message" rows="3" maxlength="5000" required><?=e($message['message'])?></textarea></label>
+                                            <button class="btn btn-primary" type="submit">Simpan perubahan</button>
+                                        </form>
+                                    </details>
+                                    <form method="post" class="inline-action" onsubmit="return confirm('Hapus pesan ini?')">
+                                        <?=form_hidden('delete_message','messages')?>
+                                        <input type="hidden" name="id" value="<?=e($message['id'])?>">
+                                        <button class="btn btn-sm btn-danger" type="submit">Hapus</button>
+                                    </form>
+                                <?php endif; ?>
+                            </div>
+                        </article>
+                    <?php endforeach; ?>
+                    <?php if (!$messages): ?><p class="empty">Belum ada percakapan. Kirim pesan pertama untuk memulai komunikasi.</p><?php endif; ?>
                 </div>
 
             <?php elseif ($page === 'reports'): ?>
