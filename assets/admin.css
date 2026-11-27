@@ -35,3 +35,30 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
 .stack-form input{width:100%;border:1px solid #dce5e9;border-radius:8px;padding:12px;background:#fff;color:var(--ink);font:inherit}
 .stack-form input:focus{border-color:#3aa59c;outline:0;box-shadow:0 0 0 3px #137c7814}
 @media(max-width:760px){.form-disclosure{padding:13px}.form-grid{grid-template-columns:minmax(0,1fr)}.row-details[open]{min-width:min(280px,80vw);max-width:calc(100vw - 65px)}.actions-cell{min-width:105px}.message-meta small{width:100%;margin-left:0}.form-panel .btn{width:100%;justify-content:center}}
+/* Conversation and reply presentation */
+.conversation-card{padding:20px 22px}
+.conversation-card .panel-head{align-items:flex-start}
+.conversation-card .panel-head>div{display:grid;gap:5px}
+.conversation-card .panel-head .field-help{font-size:11px}
+.message-item{padding:17px 0;border-bottom:1px solid #edf1f3}
+.message-item:last-child{border-bottom:0}
+.message-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.message-meta small{margin-left:auto}
+.sender-role{font-size:10px;color:#82939a}
+.message-text{margin:12px 0 10px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;color:#304852}
+.reply-quote{margin:12px 0 0;padding:10px 13px;border-left:3px solid #54aaa2;border-radius:0 8px 8px 0;background:#f1f7f7;max-width:760px}
+.reply-quote-label{font-size:10px;font-weight:800;color:#137c78;margin-bottom:5px}
+.reply-quote p{font-size:12px;color:#65777e;line-height:1.5;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:90px;overflow:hidden}
+.message-actions{display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap}
+.message-actions .row-details[open]{min-width:min(420px,80vw);max-width:620px}
+.reply-details[open]{background:#f7fbfa;border-color:#c9e3df}
+.reply-details .row-form{display:grid;gap:10px}
+.reply-details .row-form label{display:grid;gap:7px}
+.reply-details .row-form textarea{width:100%;min-height:75px;border:1px solid #dce5e9;border-radius:8px;padding:10px 12px;font:inherit;resize:vertical}
+@media(max-width:760px){
+ .conversation-card{padding:14px}
+ .message-meta{gap:7px}
+ .message-meta small{width:100%;margin:2px 0 0}
+ .message-actions{gap:6px}
+ .message-actions .row-details[open]{min-width:min(280px,82vw);max-width:calc(100vw - 55px)}
+}
