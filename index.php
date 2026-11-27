@@ -12,7 +12,7 @@ handle_post();
 
 $me = current_user();
 $page = (string)($_GET['page'] ?? ($me ? 'dashboard' : 'login'));
-$allowedPages = ['dashboard','patients','users','medications','visits','observations','messages','reports','audit','login'];
+$allowedPages = ['dashboard','patients','patient_detail','users','medications','visits','observations','messages','reports','audit','login'];
 if (!in_array($page, $allowedPages, true)) $page = 'dashboard';
 if (!$me && $page !== 'login') redirect('login');
 if ($me && $page === 'login') redirect('dashboard');
@@ -25,12 +25,21 @@ $role = $me['role'] ?? null;
 $canWriteCare = $me && in_array($role, ['admin','nurse'], true);
 $pdo = $me ? db() : null;
 
-function scoped_rows(string $sql, string $patientColumn, string $tail = ''): array
+function scoped_rows(string $sql, string $patientColumn, string $tail = '', array $extraParams = []): array
 {
     [$scope, $params] = patient_scope($patientColumn);
     $stmt = db()->prepare($sql . ' WHERE ' . $scope . ' ' . $tail);
-    $stmt->execute($params);
+    $stmt->execute([...$params, ...$extraParams]);
     return $stmt->fetchAll();
+}
+
+function search_clause(array $columns, string $query): array
+{
+    if ($query === '') {
+        return ['', []];
+    }
+    $parts = array_map(static fn(string $column): string => $column . ' LIKE ?', $columns);
+    return ['(' . implode(' OR ', $parts) . ')', array_fill(0, count($columns), '%' . $query . '%')];
 }
 
 function scoped_count(string $table, string $column, string $extra = '', array $extraParams = []): int
@@ -64,6 +73,17 @@ function page_heading(string $title, string $description): void
 $activePatients = [];
 $patientRows = [];
 $patientAssignments = [];
+$patientDetail = null;
+$patientDetailObservation = null;
+$patientDetailVisits = [];
+$patientDetailObservations = [];
+$patientDetailMedications = [];
+$patientDetailReports = [];
+$searchQuery = trim(substr((string)($_GET['q'] ?? ''), 0, 100));
+$patientSearch = trim(substr((string)($_GET['patient_search'] ?? ($page === 'patients' ? $searchQuery : '')), 0, 100));
+$selectedPatientFilter = max(0, (int)($_GET['patient_id'] ?? 0));
+$patientStatusFilter = in_array(($_GET['status'] ?? 'all'), ['active','inactive','all'], true) ? (string)($_GET['status'] ?? 'all') : 'all';
+$medicationStatusFilter = in_array(($_GET['status'] ?? 'all'), ['pending','given','all'], true) ? (string)($_GET['status'] ?? 'all') : 'all';
 $users = [];
 $medications = [];
 $visits = [];
@@ -79,15 +99,53 @@ $reminders = [];
 $flashMessage = take_flash();
 
 if ($me) {
-    if ($role === 'admin') {
-        $patientRows = $pdo->query('SELECT * FROM patients ORDER BY status ASC, name ASC')->fetchAll();
-        $activePatients = $pdo->query("SELECT * FROM patients WHERE status='active' ORDER BY name")->fetchAll();
-    } elseif ($role === 'family') {
-        $patientRows = scoped_rows('SELECT p.* FROM patients p', 'p.id', "AND p.status='active' ORDER BY p.name");
-        $activePatients = $patientRows;
-    } else {
-        $patientRows = $pdo->query("SELECT * FROM patients WHERE status='active' ORDER BY name")->fetchAll();
-        $activePatients = $patientRows;
+    $activePatients = $role === 'family'
+        ? scoped_rows('SELECT p.* FROM patients p', 'p.id', "AND p.status='active' ORDER BY p.name")
+        : $pdo->query("SELECT * FROM patients WHERE status='active' ORDER BY name")->fetchAll();
+
+    [$patientSearchSql, $patientSearchParams] = search_clause(
+        ['p.name', 'p.diagnosis', 'p.family_contact', 'CAST(p.id AS CHAR)'],
+        $patientSearch
+    );
+    $patientWhere = [];
+    $patientParams = [];
+    if ($role !== 'admin' || $patientStatusFilter !== 'all') {
+        $patientWhere[] = "p.status = ?";
+        $patientParams[] = $role === 'admin' ? $patientStatusFilter : 'active';
+    }
+    if ($patientSearchSql !== '') {
+        $patientWhere[] = $patientSearchSql;
+        $patientParams = [...$patientParams, ...$patientSearchParams];
+    }
+    $patientSql = 'SELECT p.* FROM patients p' . ($patientWhere ? ' WHERE ' . implode(' AND ', $patientWhere) : '') . ' ORDER BY p.status ASC, p.name ASC';
+    $patientStmt = $pdo->prepare($patientSql);
+    $patientStmt->execute($patientParams);
+    $patientRows = $patientStmt->fetchAll();
+
+    if ($page === 'patient_detail') {
+        $detailId = max(0, (int)($_GET['id'] ?? 0));
+        $detailStmt = $pdo->prepare("SELECT p.* FROM patients p WHERE p.id = ? AND p.status = 'active' LIMIT 1");
+        $detailStmt->execute([$detailId]);
+        $patientDetail = $detailStmt->fetch() ?: null;
+        if (!$patientDetail || !in_array($detailId, accessible_patient_ids($me), true)) {
+            flash('Profil pasien tidak ditemukan atau Anda tidak memiliki akses.', 'error');
+            redirect('patients');
+        }
+        $detailStmt = $pdo->prepare('SELECT o.*,u.name AS recorder FROM observations o INNER JOIN users u ON u.id=o.recorded_by WHERE o.patient_id=? ORDER BY o.recorded_at DESC,o.id DESC LIMIT 1');
+        $detailStmt->execute([$detailId]);
+        $patientDetailObservation = $detailStmt->fetch() ?: null;
+        $detailStmt = $pdo->prepare('SELECT v.*,u.name AS nurse FROM visits v INNER JOIN users u ON u.id=v.nurse_id WHERE v.patient_id=? ORDER BY v.visit_at DESC,v.id DESC LIMIT 6');
+        $detailStmt->execute([$detailId]);
+        $patientDetailVisits = $detailStmt->fetchAll();
+        $detailStmt = $pdo->prepare('SELECT * FROM observations WHERE patient_id=? ORDER BY recorded_at DESC,id DESC LIMIT 6');
+        $detailStmt->execute([$detailId]);
+        $patientDetailObservations = $detailStmt->fetchAll();
+        $detailStmt = $pdo->prepare('SELECT * FROM medications WHERE patient_id=? ORDER BY status ASC,scheduled_time ASC,id DESC LIMIT 8');
+        $detailStmt->execute([$detailId]);
+        $patientDetailMedications = $detailStmt->fetchAll();
+        $detailStmt = $pdo->prepare('SELECT r.*,u.name AS author FROM reports r INNER JOIN users u ON u.id=r.author_id WHERE r.patient_id=? ORDER BY r.report_date DESC,r.id DESC LIMIT 5');
+        $detailStmt->execute([$detailId]);
+        $patientDetailReports = $detailStmt->fetchAll();
     }
 
     if ($page === 'dashboard') {
@@ -114,28 +172,55 @@ if ($me) {
     if ($page === 'patients') {
         // Patient rows are already scoped above. Admin sees archived rows to restore them.
     } elseif ($page === 'users' && $role === 'admin') {
-        $users = $pdo->query('SELECT id,name,email,role,status,created_at FROM users ORDER BY created_at DESC,id DESC')->fetchAll();
+        [$usersSearchSql, $usersSearchParams] = search_clause(['name','email','role'], $searchQuery);
+        $usersStatus = in_array(($_GET['status'] ?? 'all'), ['active','inactive','all'], true) ? (string)($_GET['status'] ?? 'all') : 'all';
+        $usersWhere = [];
+        if ($usersSearchSql !== '') $usersWhere[] = $usersSearchSql;
+        if ($usersStatus !== 'all') { $usersWhere[] = 'status = ?'; $usersSearchParams[] = $usersStatus; }
+        $usersSql = 'SELECT id,name,email,role,status,created_at FROM users' . ($usersWhere ? ' WHERE ' . implode(' AND ', $usersWhere) : '') . ' ORDER BY created_at DESC,id DESC';
+        $usersStmt = $pdo->prepare($usersSql); $usersStmt->execute($usersSearchParams); $users = $usersStmt->fetchAll();
         foreach ($pdo->query('SELECT user_id,patient_id FROM patient_families') as $assignment) {
             $patientAssignments[(int)$assignment['user_id']][] = (int)$assignment['patient_id'];
         }
     } elseif ($page === 'medications') {
-        $medications = scoped_rows('SELECT m.*,p.name AS patient,g.name AS given_by_name FROM medications m INNER JOIN patients p ON p.id=m.patient_id LEFT JOIN users g ON g.id=m.given_by','m.patient_id','ORDER BY m.scheduled_time ASC,m.id DESC');
+        [$searchSql, $searchParams] = search_clause(['p.name','m.name','m.dose','m.instructions'], $searchQuery);
+        $filters = [];
+        $params = $searchParams;
+        if ($searchSql !== '') $filters[] = $searchSql;
+        if ($selectedPatientFilter > 0) { $filters[] = 'm.patient_id = ?'; $params[] = $selectedPatientFilter; }
+        if ($medicationStatusFilter !== 'all') { $filters[] = 'm.status = ?'; $params[] = $medicationStatusFilter; }
+        $tail = ($filters ? 'AND ' . implode(' AND ', $filters) . ' ' : '') . 'ORDER BY m.scheduled_time ASC,m.id DESC';
+        $medications = scoped_rows('SELECT m.*,p.name AS patient,g.name AS given_by_name FROM medications m INNER JOIN patients p ON p.id=m.patient_id LEFT JOIN users g ON g.id=m.given_by','m.patient_id',$tail,$params);
     } elseif ($page === 'visits') {
-        $visits = scoped_rows('SELECT v.*,p.name AS patient,u.name AS nurse FROM visits v INNER JOIN patients p ON p.id=v.patient_id INNER JOIN users u ON u.id=v.nurse_id','v.patient_id','ORDER BY v.visit_at DESC,v.id DESC');
+        [$searchSql, $params] = search_clause(['p.name','u.name','v.notes'], $searchQuery);
+        $tail = ($searchSql !== '' ? 'AND ' . $searchSql . ' ' : '') . ($selectedPatientFilter > 0 ? 'AND v.patient_id = ? ' : '') . 'ORDER BY v.visit_at DESC,v.id DESC';
+        if ($selectedPatientFilter > 0) $params[] = $selectedPatientFilter;
+        $visits = scoped_rows('SELECT v.*,p.name AS patient,u.name AS nurse FROM visits v INNER JOIN patients p ON p.id=v.patient_id INNER JOIN users u ON u.id=v.nurse_id','v.patient_id',$tail,$params);
     } elseif ($page === 'observations') {
-        $observations = scoped_rows('SELECT o.*,p.name AS patient,u.name AS recorder FROM observations o INNER JOIN patients p ON p.id=o.patient_id INNER JOIN users u ON u.id=o.recorded_by','o.patient_id','ORDER BY o.recorded_at DESC,o.id DESC');
+        [$searchSql, $params] = search_clause(['p.name','o.blood_pressure','o.complaint','o.notes'], $searchQuery);
+        $tail = ($searchSql !== '' ? 'AND ' . $searchSql . ' ' : '') . ($selectedPatientFilter > 0 ? 'AND o.patient_id = ? ' : '') . 'ORDER BY o.recorded_at DESC,o.id DESC';
+        if ($selectedPatientFilter > 0) $params[] = $selectedPatientFilter;
+        $observations = scoped_rows('SELECT o.*,p.name AS patient,u.name AS recorder FROM observations o INNER JOIN patients p ON p.id=o.patient_id INNER JOIN users u ON u.id=o.recorded_by','o.patient_id',$tail,$params);
     } elseif ($page === 'messages') {
-        $messages = array_reverse(scoped_rows('SELECT m.*,p.name AS patient,u.name AS sender,u.role AS sender_role,pm.message AS reply_message,pu.name AS reply_sender,pu.role AS reply_sender_role FROM messages m INNER JOIN patients p ON p.id=m.patient_id INNER JOIN users u ON u.id=m.sender_id LEFT JOIN messages pm ON pm.id=m.reply_to_id LEFT JOIN users pu ON pu.id=pm.sender_id','m.patient_id','ORDER BY m.created_at DESC,m.id DESC LIMIT 200'));
+        [$searchSql, $params] = search_clause(['p.name','u.name','m.message'], $searchQuery);
+        $tail = ($searchSql !== '' ? 'AND ' . $searchSql . ' ' : '') . ($selectedPatientFilter > 0 ? 'AND m.patient_id = ? ' : '') . 'ORDER BY m.created_at DESC,m.id DESC LIMIT 200';
+        if ($selectedPatientFilter > 0) $params[] = $selectedPatientFilter;
+        $messages = array_reverse(scoped_rows('SELECT m.*,p.name AS patient,u.name AS sender,u.role AS sender_role,pm.message AS reply_message,pu.name AS reply_sender,pu.role AS reply_sender_role FROM messages m INNER JOIN patients p ON p.id=m.patient_id INNER JOIN users u ON u.id=m.sender_id LEFT JOIN messages pm ON pm.id=m.reply_to_id LEFT JOIN users pu ON pu.id=pm.sender_id','m.patient_id',$tail,$params));
     } elseif ($page === 'reports') {
-        $reports = scoped_rows('SELECT r.*,p.name AS patient,u.name AS author FROM reports r INNER JOIN patients p ON p.id=r.patient_id INNER JOIN users u ON u.id=r.author_id','r.patient_id','ORDER BY r.report_date DESC,r.id DESC');
+        [$searchSql, $params] = search_clause(['p.name','u.name','r.summary','r.actions_taken','r.response'], $searchQuery);
+        $tail = ($searchSql !== '' ? 'AND ' . $searchSql . ' ' : '') . ($selectedPatientFilter > 0 ? 'AND r.patient_id = ? ' : '') . 'ORDER BY r.report_date DESC,r.id DESC';
+        if ($selectedPatientFilter > 0) $params[] = $selectedPatientFilter;
+        $reports = scoped_rows('SELECT r.*,p.name AS patient,u.name AS author FROM reports r INNER JOIN patients p ON p.id=r.patient_id INNER JOIN users u ON u.id=r.author_id','r.patient_id',$tail,$params);
     } elseif ($page === 'audit' && $role === 'admin') {
-        $auditRows = $pdo->query('SELECT a.*,u.name AS actor FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id ORDER BY a.created_at DESC,a.id DESC LIMIT 200')->fetchAll();
+        [$searchSql, $params] = search_clause(['u.name','a.action','a.entity','a.details','CAST(a.entity_id AS CHAR)'], $searchQuery);
+        $sql = 'SELECT a.*,u.name AS actor FROM audit_logs a LEFT JOIN users u ON u.id=a.actor_id' . ($searchSql !== '' ? ' WHERE ' . $searchSql : '') . ' ORDER BY a.created_at DESC,a.id DESC LIMIT 200';
+        $stmt = $pdo->prepare($sql); $stmt->execute($params); $auditRows = $stmt->fetchAll();
     }
 }
 
 $roleDashboardTitle = $role === 'admin' ? 'Ringkasan Admin' : ($role === 'nurse' ? 'Ringkasan Perawat' : 'Ringkasan Keluarga');
 $pageTitles = [
-    'dashboard'=>$roleDashboardTitle, 'patients'=>'Data pasien', 'users'=>'Manajemen pengguna',
+    'dashboard'=>$roleDashboardTitle, 'patients'=>'Data pasien', 'patient_detail'=>'Profil pasien', 'users'=>'Manajemen pengguna',
     'medications'=>'Jadwal obat', 'visits'=>'Kunjungan', 'observations'=>'Pantauan kondisi',
     'messages'=>'Pesan', 'reports'=>'Laporan harian', 'audit'=>'Riwayat aktivitas',
 ];
@@ -155,8 +240,8 @@ if ($role === 'admin') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#132d3b">
     <title>RawatBersama · <?=e($pageTitles[$page] ?? 'Masuk')?></title>
-    <link rel="stylesheet" href="assets/style.css?v=4">
-    <link rel="stylesheet" href="assets/admin.css?v=3">
+    <link rel="stylesheet" href="assets/style.css?v=5">
+    <link rel="stylesheet" href="assets/admin.css?v=4">
 </head>
 <body class="<?=!$me ? 'login-body' : ''?>">
 <?php if (!$me): ?>
@@ -195,7 +280,15 @@ if ($role === 'admin') {
         <header class="topbar">
             <button type="button" class="mobile-menu" id="mobileMenu" aria-label="Buka menu navigasi" aria-controls="sidebar" aria-expanded="false">☰</button>
             <div><span class="eyebrow">RAWATBERSAMA / <?=e(strtoupper($page))?></span><h2><?=e($pageTitles[$page] ?? 'Ringkasan')?></h2></div>
-            <div class="top-actions"><span class="date-chip"><?=e(date('d M Y'))?></span><div class="avatar avatar-small"><?=e(strtoupper(substr($me['name'],0,1)))?></div></div>
+            <div class="top-actions">
+                <form method="get" action="index.php" class="global-search" role="search">
+                    <input type="hidden" name="page" value="patients">
+                    <label class="sr-only" for="globalPatientSearch">Cari pasien</label>
+                    <input id="globalPatientSearch" type="search" name="patient_search" maxlength="100" value="<?=e($patientSearch)?>" placeholder="Cari pasien, diagnosis, atau ID...">
+                    <button type="submit" aria-label="Cari pasien" title="Cari pasien">⌕</button>
+                </form>
+                <span class="date-chip"><?=e(date('d M Y'))?></span><div class="avatar avatar-small"><?=e(strtoupper(substr($me['name'],0,1)))?></div>
+            </div>
         </header>
         <section class="content">
             <?php if ($flashMessage): ?><div class="alert <?=e($flashMessage['type'])?>" role="status"><?=e($flashMessage['message'])?></div><?php endif; ?>
@@ -274,8 +367,79 @@ if ($role === 'admin') {
                     </article>
                 </div>
 
+            <?php elseif ($page === 'patient_detail' && $patientDetail): ?>
+                <?php page_heading('Profil pasien', 'Ringkasan identitas dan catatan perawatan pasien dalam satu tampilan.'); ?>
+                <div class="detail-toolbar"><a class="btn btn-outline" href="index.php?page=patients">← Kembali ke data pasien</a><span class="tag tag-green">Pasien aktif</span></div>
+                <section class="patient-hero">
+                    <div class="patient-identity">
+                        <div class="patient-avatar"><?=e(strtoupper(substr($patientDetail['name'],0,1)))?></div>
+                        <div><span class="eyebrow">PROFIL PASIEN · ID #<?=e($patientDetail['id'])?></span><h2><?=e($patientDetail['name'])?></h2><p><?=e($patientDetail['age'])?> tahun <span>·</span> <?=e($patientDetail['gender'])?></p></div>
+                    </div>
+                    <div class="patient-quick-actions">
+                        <?php if ($canWriteCare): ?>
+                            <a class="btn btn-outline" href="index.php?page=visits&patient_id=<?=e($patientDetail['id'])?>">＋ Kunjungan</a>
+                            <a class="btn btn-outline" href="index.php?page=observations&patient_id=<?=e($patientDetail['id'])?>">＋ Pantauan</a>
+                            <a class="btn btn-primary" href="index.php?page=medications&patient_id=<?=e($patientDetail['id'])?>">Lihat jadwal obat</a>
+                        <?php else: ?>
+                            <a class="btn btn-primary" href="index.php?page=messages&patient_id=<?=e($patientDetail['id'])?>">Hubungi perawat</a>
+                        <?php endif; ?>
+                    </div>
+                </section>
+                <div class="profile-grid">
+                    <article class="panel-card profile-card">
+                        <div class="panel-head"><h3>Informasi medis</h3><span class="tag">Identitas</span></div>
+                        <div class="profile-info-row"><span>Diagnosis / kondisi</span><b><?=e($patientDetail['diagnosis'] ?: 'Belum dicatat')?></b></div>
+                        <div class="profile-info-row"><span>Alergi</span><b class="<?=$patientDetail['allergies'] ? 'text-alert' : ''?>"><?=e($patientDetail['allergies'] ?: 'Belum dicatat')?></b></div>
+                        <div class="profile-info-row"><span>Alamat</span><b><?=e($patientDetail['address'] ?: 'Belum dicatat')?></b></div>
+                        <?php if ($role !== 'family'): ?><div class="profile-info-row"><span>Kontak keluarga</span><b><?=e($patientDetail['family_contact'] ?: 'Belum dicatat')?></b></div><?php endif; ?>
+                    </article>
+                    <article class="panel-card profile-card">
+                        <div class="panel-head"><h3>Pemantauan kondisi terakhir</h3><span class="tag">Dokumentasi</span></div>
+                        <?php if ($patientDetailObservation): ?>
+                            <div class="vital-grid">
+                                <div><small>Tekanan darah</small><b><?=e($patientDetailObservation['blood_pressure'] ?: '—')?></b><small>mmHg</small></div>
+                                <div><small>Suhu tubuh</small><b><?=e($patientDetailObservation['temperature'] !== null ? $patientDetailObservation['temperature'] . '°' : '—')?></b><small>Celsius</small></div>
+                                <div><small>Ukuran luka</small><b><?=e($patientDetailObservation['wound_size'] !== null ? $patientDetailObservation['wound_size'] : '—')?></b><small>cm</small></div>
+                            </div>
+                            <div class="profile-info-row"><span>Keluhan</span><b><?=e($patientDetailObservation['complaint'] ?: 'Tidak ada keluhan tercatat')?></b></div>
+                            <div class="profile-info-row"><span>Catatan</span><b><?=e($patientDetailObservation['notes'] ?: '—')?></b></div>
+                            <p class="profile-timestamp">Dicatat <?=e($patientDetailObservation['recorded_at'])?> oleh <?=e($patientDetailObservation['recorder'])?></p>
+                        <?php else: ?><p class="empty">Belum ada pemantauan kondisi yang dicatat.</p><?php endif; ?>
+                    </article>
+                </div>
+                <div class="profile-grid profile-grid-secondary">
+                    <article class="panel-card profile-card">
+                        <div class="panel-head"><h3>Riwayat kunjungan</h3><a href="index.php?page=visits&patient_id=<?=e($patientDetail['id'])?>">Lihat semua</a></div>
+                        <?php foreach ($patientDetailVisits as $visit): ?><div class="profile-list-item"><b><?=e($visit['nurse'])?></b><span><?=e($visit['visit_at'])?></span><p><?=e($visit['notes'])?></p></div><?php endforeach; ?>
+                        <?php if (!$patientDetailVisits): ?><p class="empty">Belum ada kunjungan tercatat.</p><?php endif; ?>
+                    </article>
+                    <article class="panel-card profile-card">
+                        <div class="panel-head"><h3>Jadwal obat</h3><a href="index.php?page=medications&patient_id=<?=e($patientDetail['id'])?>">Lihat semua</a></div>
+                        <?php foreach ($patientDetailMedications as $med): ?><div class="profile-list-item medication-profile-item"><div><b><?=e($med['name'])?></b><span><?=e($med['dose'])?> · <?=e(substr($med['scheduled_time'],0,5))?></span></div><span class="tag <?=$med['status']==='given'?'tag-green':'tag-warn'?>"><?=$med['status']==='given'?'Sudah diberikan':'Menunggu'?></span><p><?=e($med['instructions'] ?: 'Tidak ada instruksi tambahan')?></p></div><?php endforeach; ?>
+                        <?php if (!$patientDetailMedications): ?><p class="empty">Belum ada jadwal obat.</p><?php endif; ?>
+                    </article>
+                    <article class="panel-card profile-card">
+                        <div class="panel-head"><h3>Pantauan sebelumnya</h3><a href="index.php?page=observations&patient_id=<?=e($patientDetail['id'])?>">Lihat semua</a></div>
+                        <?php foreach ($patientDetailObservations as $obs): ?><div class="profile-list-item"><b><?=e($obs['recorded_at'])?></b><span>TD <?=e($obs['blood_pressure'] ?: '—')?> · Suhu <?=e($obs['temperature'] !== null ? $obs['temperature'] . '°C' : '—')?></span><p><?=e($obs['complaint'] ?: ($obs['notes'] ?: 'Tidak ada catatan tambahan'))?></p></div><?php endforeach; ?>
+                        <?php if (!$patientDetailObservations): ?><p class="empty">Belum ada riwayat pemantauan.</p><?php endif; ?>
+                    </article>
+                    <article class="panel-card profile-card">
+                        <div class="panel-head"><h3>Laporan perawatan</h3><a href="index.php?page=reports&patient_id=<?=e($patientDetail['id'])?>">Lihat semua</a></div>
+                        <?php foreach ($patientDetailReports as $report): ?><div class="profile-list-item"><b><?=e($report['report_date'])?></b><span><?=e($report['author'])?></span><p><?=e($report['summary'])?></p></div><?php endforeach; ?>
+                        <?php if (!$patientDetailReports): ?><p class="empty">Belum ada laporan perawatan.</p><?php endif; ?>
+                    </article>
+                </div>
+
             <?php elseif ($page === 'patients'): ?>
                 <?php page_heading('Data pasien', $role === 'admin' ? 'Daftarkan pasien beserta akun keluarga dalam satu proses, lalu kelola data pasien.' : ($role === 'nurse' ? 'Daftarkan pasien baru sekaligus buatkan akun keluarga.' : 'Daftar pasien yang terhubung dengan akun keluarga Anda.')); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search">
+                    <input type="hidden" name="page" value="patients">
+                    <div class="filter-search"><input type="search" name="patient_search" maxlength="100" value="<?=e($patientSearch)?>" placeholder="Cari nama, diagnosis, kontak, atau ID pasien..."></div>
+                    <?php if ($role === 'admin'): ?><select name="status" aria-label="Filter status pasien"><option value="all" <?=$patientStatusFilter==='all'?'selected':''?>>Semua status</option><option value="active" <?=$patientStatusFilter==='active'?'selected':''?>>Aktif</option><option value="inactive" <?=$patientStatusFilter==='inactive'?'selected':''?>>Diarsipkan</option></select><?php endif; ?>
+                    <button class="btn btn-primary" type="submit">Cari pasien</button>
+                    <?php if ($patientSearch !== '' || ($role === 'admin' && $patientStatusFilter !== 'all')): ?><a class="btn btn-outline" href="index.php?page=patients">Reset</a><?php endif; ?>
+                    <span class="result-count"><?=count($patientRows)?> hasil</span>
+                </form>
                 <?php if (in_array($role, ['admin','nurse'], true)): ?>
                     <details class="panel-card form-disclosure registration-disclosure">
                         <summary class="btn btn-primary">＋ Daftarkan pasien + akun keluarga</summary>
@@ -316,9 +480,9 @@ if ($role === 'admin') {
                         </form>
                     </details>
                 <?php endif; ?>
-                <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Nama pasien</th><th>Usia</th><th>Jenis kelamin</th><th>Diagnosis</th><th>Status</th><?php if ($role==='admin'): ?><th>Aksi</th><?php endif; ?></tr></thead><tbody>
+                <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Nama pasien</th><th>Usia</th><th>Jenis kelamin</th><th>Diagnosis</th><th>Status</th><th>Profil</th><?php if ($role==='admin'): ?><th>Aksi</th><?php endif; ?></tr></thead><tbody>
                     <?php foreach ($patientRows as $patient): ?><tr>
-                        <td><b><?=e($patient['name'])?></b><small>ID #<?=e($patient['id'])?></small></td><td><?=e($patient['age'])?> th</td><td><?=e($patient['gender'])?></td><td><?=e($patient['diagnosis'] ?: '—')?></td><td><span class="tag <?=$patient['status']==='active'?'tag-green':'tag-warn'?>"><?=$patient['status']==='active'?'Aktif':'Diarsipkan'?></span></td>
+                        <td><b><?=e($patient['name'])?></b><small>ID #<?=e($patient['id'])?></small></td><td><?=e($patient['age'])?> th</td><td><?=e($patient['gender'])?></td><td><?=e($patient['diagnosis'] ?: '—')?></td><td><span class="tag <?=$patient['status']==='active'?'tag-green':'tag-warn'?>"><?=$patient['status']==='active'?'Aktif':'Diarsipkan'?></span></td><td><?php if ($patient['status']==='active'): ?><a class="btn btn-sm btn-outline" href="index.php?page=patient_detail&id=<?=e($patient['id'])?>">Lihat profil</a><?php else: ?><span class="muted">—</span><?php endif; ?></td>
                         <?php if ($role==='admin'): ?><td class="actions-cell"><details class="row-details"><summary class="btn btn-sm">Edit</summary><form method="post" class="form-panel row-form"><?=form_hidden('save_patient','patients')?><input type="hidden" name="id" value="<?=e($patient['id'])?>"><div class="form-grid"><label>Nama<input name="name" maxlength="150" value="<?=e($patient['name'])?>" required></label><label>Usia<input type="number" name="age" min="0" max="120" value="<?=e($patient['age'])?>" required></label><label>Jenis kelamin<select name="gender"><option value="Perempuan" <?=$patient['gender']==='Perempuan'?'selected':''?>>Perempuan</option><option value="Laki-laki" <?=$patient['gender']==='Laki-laki'?'selected':''?>>Laki-laki</option><option value="Lainnya" <?=$patient['gender']==='Lainnya'?'selected':''?>>Lainnya</option></select></label><label>Diagnosis<input name="diagnosis" value="<?=e($patient['diagnosis'])?>"></label><label>Alergi<input name="allergies" value="<?=e($patient['allergies'])?>"></label><label>Kontak keluarga<input name="family_contact" value="<?=e($patient['family_contact'])?>"></label><label class="span-2">Alamat<textarea name="address" rows="2"><?=e($patient['address'])?></textarea></label></div><button class="btn btn-primary" type="submit">Simpan perubahan</button></form></details>
                             <form method="post" class="inline-action" onsubmit="return confirm('<?= $patient['status']==='active' ? 'Arsipkan pasien ini? Data perawatan tetap disimpan.' : 'Pulihkan pasien ini?' ?>')"><?=form_hidden('set_patient_status','patients')?><input type="hidden" name="id" value="<?=e($patient['id'])?>"><input type="hidden" name="status" value="<?=$patient['status']==='active'?'inactive':'active'?>"><button class="btn btn-sm" type="submit"><?=$patient['status']==='active'?'Arsipkan':'Pulihkan'?></button></form></td><?php endif; ?>
                     </tr><?php endforeach; ?>
@@ -326,6 +490,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'users' && $role === 'admin'): ?>
                 <?php page_heading('Manajemen pengguna','Kelola akun administrator dan perawat. Akun keluarga dibuat otomatis saat pendaftaran pasien.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="users"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari nama, email, atau peran pengguna..."></div><select name="status" aria-label="Filter status akun"><option value="all" <?=($_GET['status'] ?? 'all')==='all'?'selected':''?>>Semua status</option><option value="active" <?=($_GET['status'] ?? '')==='active'?'selected':''?>>Aktif</option><option value="inactive" <?=($_GET['status'] ?? '')==='inactive'?'selected':''?>>Nonaktif</option></select><button class="btn btn-primary" type="submit">Cari pengguna</button><?php if ($searchQuery!=='' || (($_GET['status'] ?? 'all')!=='all')): ?><a class="btn btn-outline" href="index.php?page=users">Reset</a><?php endif; ?><span class="result-count"><?=count($users)?> hasil</span></form>
                 <details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Tambah pengguna</summary><form method="post" class="form-panel"><?=form_hidden('save_user','users')?>
                     <div class="form-grid"><label>Nama lengkap<input name="name" maxlength="120" required></label><label>Email<input type="email" name="email" maxlength="190" required></label><label>Kata sandi awal (min. 10 karakter)<input type="password" name="password" minlength="10" required></label><label>Peran<select name="role" required><option value="nurse">Perawat</option><option value="admin">Admin</option></select></label></div><p class="field-help">Untuk membuat akun keluarga, gunakan formulir pendaftaran pasien agar akun langsung terhubung dengan pasien.</p><button class="btn btn-primary" type="submit">Buat akun</button>
                 </form></details>
@@ -339,6 +504,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'medications'): ?>
                 <?php page_heading('Jadwal obat','Catat obat, dosis, waktu, dan status pemberiannya.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="medications"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari nama pasien, obat, dosis, atau instruksi..."></div><select name="patient_id" aria-label="Filter pasien"><option value="0">Semua pasien</option><?=patient_select_options($activePatients,$selectedPatientFilter)?></select><select name="status" aria-label="Filter status obat"><option value="all" <?=$medicationStatusFilter==='all'?'selected':''?>>Semua status</option><option value="pending" <?=$medicationStatusFilter==='pending'?'selected':''?>>Menunggu</option><option value="given" <?=$medicationStatusFilter==='given'?'selected':''?>>Sudah diberikan</option></select><button class="btn btn-primary" type="submit">Filter</button><?php if ($searchQuery!=='' || $selectedPatientFilter>0 || $medicationStatusFilter!=='all'): ?><a class="btn btn-outline" href="index.php?page=medications">Reset</a><?php endif; ?><span class="result-count"><?=count($medications)?> hasil</span></form>
                 <?php if ($canWriteCare && $activePatients): ?><details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Tambah jadwal obat</summary><form method="post" class="form-panel"><?=form_hidden('save_medication','medications')?><div class="form-grid"><label>Pasien<select name="patient_id" required><?=patient_select_options($activePatients)?></select></label><label>Nama obat<input name="name" maxlength="150" required></label><label>Dosis<input name="dose" maxlength="100" required></label><label>Waktu<input type="time" name="scheduled_time" required></label><label class="span-2">Instruksi<input name="instructions" maxlength="1000"></label></div><button class="btn btn-primary" type="submit">Simpan jadwal</button></form></details><?php endif; ?>
                 <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Pasien</th><th>Obat</th><th>Dosis</th><th>Status</th><?php if ($canWriteCare): ?><th>Aksi</th><?php endif; ?></tr></thead><tbody>
                     <?php foreach ($medications as $med): ?><tr><td><?=e(substr($med['scheduled_time'],0,5))?></td><td><?=e($med['patient'])?></td><td><b><?=e($med['name'])?></b><small><?=e($med['instructions'])?></small></td><td><?=e($med['dose'])?></td><td><span class="tag <?=$med['status']==='given'?'tag-green':'tag-warn'?>"><?=$med['status']==='given'?'Sudah diberikan':'Menunggu'?></span><?php if ($med['given_at']): ?><small><?=e($med['given_at'])?></small><?php endif; ?></td>
@@ -350,6 +516,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'visits'): ?>
                 <?php page_heading('Catatan kunjungan','Dokumentasikan waktu kunjungan dan catatan perawat.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="visits"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari pasien, perawat, atau catatan kunjungan..."></div><select name="patient_id" aria-label="Filter pasien"><option value="0">Semua pasien</option><?=patient_select_options($activePatients,$selectedPatientFilter)?></select><button class="btn btn-primary" type="submit">Cari</button><?php if ($searchQuery!=='' || $selectedPatientFilter>0): ?><a class="btn btn-outline" href="index.php?page=visits">Reset</a><?php endif; ?><span class="result-count"><?=count($visits)?> hasil</span></form>
                 <?php if ($canWriteCare && $activePatients): ?><details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Catat kunjungan</summary><form method="post" class="form-panel"><?=form_hidden('save_visit','visits')?><div class="form-grid"><label>Pasien<select name="patient_id"><?=patient_select_options($activePatients)?></select></label><label>Tanggal & waktu<input type="datetime-local" name="visit_at" value="<?=e(date('Y-m-d\\TH:i'))?>" required></label><label class="span-2">Catatan<textarea name="notes" rows="3" required></textarea></label></div><button class="btn btn-primary" type="submit">Simpan kunjungan</button></form></details><?php endif; ?>
                 <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Pasien</th><th>Petugas</th><th>Catatan</th><?php if ($canWriteCare): ?><th>Aksi</th><?php endif; ?></tr></thead><tbody>
                     <?php foreach ($visits as $visit): $canEdit = $role==='admin' || (int)$visit['nurse_id']===(int)$me['id']; ?><tr><td><?=e($visit['visit_at'])?></td><td><?=e($visit['patient'])?></td><td><?=e($visit['nurse'])?></td><td><?=e($visit['notes'])?></td>
@@ -359,6 +526,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'observations'): ?>
                 <?php page_heading('Pantauan kondisi','Catat tanda vital, keluhan, ukuran luka, dan perkembangan pasien.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="observations"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari pasien, keluhan, tekanan darah, atau catatan..."></div><select name="patient_id" aria-label="Filter pasien"><option value="0">Semua pasien</option><?=patient_select_options($activePatients,$selectedPatientFilter)?></select><button class="btn btn-primary" type="submit">Cari</button><?php if ($searchQuery!=='' || $selectedPatientFilter>0): ?><a class="btn btn-outline" href="index.php?page=observations">Reset</a><?php endif; ?><span class="result-count"><?=count($observations)?> hasil</span></form>
                 <?php if ($canWriteCare && $activePatients): ?><details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Tambah pantauan</summary><form method="post" class="form-panel"><?=form_hidden('save_observation','observations')?><div class="form-grid"><label>Pasien<select name="patient_id"><?=patient_select_options($activePatients)?></select></label><label>Tekanan darah<input name="blood_pressure" maxlength="20" placeholder="120/80"></label><label>Suhu (°C)<input type="number" step="0.1" min="25" max="45" name="temperature"></label><label>Ukuran luka (cm)<input type="number" step="0.01" min="0" max="999" name="wound_size"></label><label>Keluhan<input name="complaint" maxlength="2000"></label><label>Catatan<textarea name="notes" rows="2"></textarea></label></div><button class="btn btn-primary" type="submit">Simpan pantauan</button></form></details><?php endif; ?>
                 <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Pasien</th><th>Tekanan darah</th><th>Suhu</th><th>Ukuran luka</th><th>Keluhan</th><?php if ($canWriteCare): ?><th>Aksi</th><?php endif; ?></tr></thead><tbody>
                     <?php foreach ($observations as $obs): $canEdit = $role==='admin' || (int)$obs['recorded_by']===(int)$me['id']; ?><tr><td><?=e($obs['recorded_at'])?></td><td><?=e($obs['patient'])?></td><td><?=e($obs['blood_pressure'] ?: '—')?></td><td><?=e($obs['temperature'] ?: '—')?></td><td><?=e($obs['wound_size'] ?: '—')?></td><td><?=e($obs['complaint'] ?: '—')?></td>
@@ -368,6 +536,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'messages'): ?>
                 <?php page_heading('Percakapan perawatan','Kirim pesan baru atau balas pesan keluarga dan tim perawat.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="messages"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari isi pesan, nama pengirim, atau pasien..."></div><select name="patient_id" aria-label="Filter pasien"><option value="0">Semua pasien</option><?=patient_select_options($activePatients,$selectedPatientFilter)?></select><button class="btn btn-primary" type="submit">Cari pesan</button><?php if ($searchQuery!=='' || $selectedPatientFilter>0): ?><a class="btn btn-outline" href="index.php?page=messages">Reset</a><?php endif; ?><span class="result-count"><?=count($messages)?> hasil</span></form>
                 <?php if ($activePatients): ?>
                     <details class="panel-card form-disclosure" open>
                         <summary class="btn btn-primary">＋ Tulis pesan baru</summary>
@@ -434,6 +603,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'reports'): ?>
                 <?php page_heading('Laporan harian','Dokumentasi kondisi, tindakan, dan respons pasien.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="reports"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari pasien, penulis, ringkasan, atau tindakan..."></div><select name="patient_id" aria-label="Filter pasien"><option value="0">Semua pasien</option><?=patient_select_options($activePatients,$selectedPatientFilter)?></select><button class="btn btn-primary" type="submit">Cari laporan</button><?php if ($searchQuery!=='' || $selectedPatientFilter>0): ?><a class="btn btn-outline" href="index.php?page=reports">Reset</a><?php endif; ?><span class="result-count"><?=count($reports)?> hasil</span></form>
                 <?php if ($canWriteCare && $activePatients): ?><details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Buat laporan</summary><form method="post" class="form-panel"><?=form_hidden('save_report','reports')?><div class="form-grid"><label>Pasien<select name="patient_id"><?=patient_select_options($activePatients)?></select></label><label>Tanggal<input type="date" name="report_date" value="<?=e(date('Y-m-d'))?>" required></label><label class="span-2">Ringkasan<textarea name="summary" rows="3" required></textarea></label><label class="span-2">Tindakan<textarea name="actions_taken" rows="2"></textarea></label><label class="span-2">Respons pasien<textarea name="response" rows="2"></textarea></label></div><button class="btn btn-primary" type="submit">Simpan laporan</button></form></details><?php endif; ?>
                 <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Tanggal</th><th>Pasien</th><th>Penulis</th><th>Ringkasan</th><th>Tindakan</th><th>Respons</th><?php if ($canWriteCare): ?><th>Aksi</th><?php endif; ?></tr></thead><tbody>
                     <?php foreach ($reports as $report): $canEdit = $role==='admin' || (int)$report['author_id']===(int)$me['id']; ?><tr><td><?=e($report['report_date'])?></td><td><?=e($report['patient'])?></td><td><?=e($report['author'])?></td><td><?=e($report['summary'])?></td><td><?=e($report['actions_taken'])?></td><td><?=e($report['response'])?></td>
@@ -443,6 +613,7 @@ if ($role === 'admin') {
 
             <?php elseif ($page === 'audit' && $role === 'admin'): ?>
                 <?php page_heading('Riwayat aktivitas','Catatan tindakan pengguna untuk membantu penelusuran perubahan data.'); ?>
+                <form method="get" action="index.php" class="filter-toolbar" role="search"><input type="hidden" name="page" value="audit"><div class="filter-search"><input type="search" name="q" maxlength="100" value="<?=e($searchQuery)?>" placeholder="Cari pengguna, tindakan, modul, atau ID data..."></div><button class="btn btn-primary" type="submit">Cari aktivitas</button><?php if ($searchQuery!==''): ?><a class="btn btn-outline" href="index.php?page=audit">Reset</a><?php endif; ?><span class="result-count"><?=count($auditRows)?> hasil terbaru</span></form>
                 <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Waktu</th><th>Pengguna</th><th>Tindakan</th><th>Modul</th><th>ID data</th><th>Detail</th><th>IP</th></tr></thead><tbody>
                     <?php foreach ($auditRows as $log): ?><tr><td><?=e($log['created_at'])?></td><td><?=e($log['actor'] ?: 'Pengguna dihapus')?></td><td><span class="tag"><?=e($log['action'])?></span></td><td><?=e($log['entity'])?></td><td><?=e($log['entity_id'] ?? '—')?></td><td><?=e($log['details'] ?: '—')?></td><td><?=e($log['ip_address'] ?: '—')?></td></tr><?php endforeach; ?>
                 </tbody></table></div><?php if (!$auditRows): ?><p class="empty">Belum ada aktivitas yang tercatat.</p><?php endif; ?></div>
@@ -453,6 +624,6 @@ if ($role === 'admin') {
     </main>
 </div>
 <?php endif; ?>
-<script src="assets/app.js?v=4"></script>
+<script src="assets/app.js?v=5"></script>
 </body>
 </html>
