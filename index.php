@@ -155,7 +155,7 @@ if ($role === 'admin') {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#132d3b">
     <title>RawatBersama · <?=e($pageTitles[$page] ?? 'Masuk')?></title>
-    <link rel="stylesheet" href="assets/style.css?v=3">
+    <link rel="stylesheet" href="assets/style.css?v=4">
     <link rel="stylesheet" href="assets/admin.css?v=2">
 </head>
 <body class="<?=!$me ? 'login-body' : ''?>">
@@ -421,6 +421,6 @@ if ($role === 'admin') {
     </main>
 </div>
 <?php endif; ?>
-<script src="assets/app.js?v=3"></script>
+<script src="assets/app.js?v=4"></script>
 </body>
 </html>
