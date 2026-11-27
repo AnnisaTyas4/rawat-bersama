@@ -238,7 +238,7 @@ function sync_family_patients(int $userId, string $role, array $patientIds): voi
     }
     $ids = array_values(array_unique(array_filter(array_map('intval', $patientIds), static fn($id) => $id > 0)));
     if (!$ids) {
-        return;
+        throw new DomainException('Setiap akun keluarga harus terhubung dengan minimal satu pasien.');
     }
     $check = $pdo->prepare("SELECT id FROM patients WHERE id = ? AND status = 'active'");
     $insert = $pdo->prepare('INSERT INTO patient_families (user_id, patient_id) VALUES (?, ?)');
