@@ -49,7 +49,7 @@ function handle_post(): void
     try {
         switch ($action) {
             case 'save_patient': {
-                require_role(['admin']);
+                require_role(['admin', 'nurse']);
                 $id = post_id();
                 $name = post_value('name');
                 $age = filter_var($_POST['age'] ?? null, FILTER_VALIDATE_INT);
@@ -59,6 +59,7 @@ function handle_post(): void
                 }
                 $data = [$name, $age, $gender, post_value('diagnosis'), post_value('allergies'), post_value('address'), post_value('family_contact')];
                 if ($id > 0) {
+                    require_role(['admin']);
                     $check = $pdo->prepare('SELECT id FROM patients WHERE id = ?');
                     $check->execute([$id]);
                     if (!$check->fetchColumn()) {
@@ -69,10 +70,30 @@ function handle_post(): void
                     audit_log($userId, 'update', 'patient', $id, ['name' => $name]);
                     flash('Data pasien berhasil diperbarui.');
                 } else {
+                    $familyName = post_value('family_name');
+                    $familyEmail = strtolower(post_value('family_email'));
+                    $familyPassword = (string)($_POST['family_password'] ?? '');
+                    $familyPasswordConfirm = (string)($_POST['family_password_confirm'] ?? '');
+                    if ($familyName === '' || text_length($familyName) > 120 || !filter_var($familyEmail, FILTER_VALIDATE_EMAIL) || strlen($familyEmail) > 190 || strlen($familyPassword) < 10 || $familyPassword !== $familyPasswordConfirm) {
+                        throw new DomainException('Lengkapi nama dan email keluarga yang valid. Kata sandi minimal 10 karakter dan konfirmasinya harus sama.');
+                    }
+                    $emailCheck = $pdo->prepare('SELECT id FROM users WHERE email = ? LIMIT 1');
+                    $emailCheck->execute([$familyEmail]);
+                    if ($emailCheck->fetchColumn()) {
+                        throw new DomainException('Email keluarga sudah digunakan. Gunakan alamat email lain untuk membuat akun keluarga baru.');
+                    }
+
+                    $pdo->beginTransaction();
                     $pdo->prepare('INSERT INTO patients(name,age,gender,diagnosis,allergies,address,family_contact) VALUES(?,?,?,?,?,?,?)')->execute($data);
-                    $newId = (int)$pdo->lastInsertId();
-                    audit_log($userId, 'create', 'patient', $newId, ['name' => $name]);
-                    flash('Pasien baru berhasil ditambahkan.');
+                    $newPatientId = (int)$pdo->lastInsertId();
+                    $pdo->prepare("INSERT INTO users(name,email,password_hash,role,status) VALUES(?,?,?,'family','active')")
+                        ->execute([$familyName, $familyEmail, password_hash($familyPassword, PASSWORD_DEFAULT)]);
+                    $newFamilyId = (int)$pdo->lastInsertId();
+                    $pdo->prepare('INSERT INTO patient_families(user_id,patient_id) VALUES(?,?)')->execute([$newFamilyId, $newPatientId]);
+                    audit_log($userId, 'create', 'patient', $newPatientId, ['name' => $name, 'family_user_id' => $newFamilyId]);
+                    audit_log($userId, 'create', 'user', $newFamilyId, ['email' => $familyEmail, 'role' => 'family', 'patient_id' => $newPatientId]);
+                    $pdo->commit();
+                    flash('Pasien dan akun keluarga berhasil dibuat serta langsung dihubungkan.');
                 }
                 redirect('patients');
             }
@@ -100,8 +121,8 @@ function handle_post(): void
                 $email = strtolower(post_value('email'));
                 $password = (string)($_POST['password'] ?? '');
                 $newRole = post_value('role');
-                if ($name === '' || text_length($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 10 || !in_array($newRole, ['admin', 'nurse', 'family'], true)) {
-                    throw new DomainException('Lengkapi nama, email valid, peran, dan kata sandi minimal 10 karakter.');
+                if ($name === '' || text_length($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($password) < 10 || !in_array($newRole, ['admin', 'nurse'], true)) {
+                    throw new DomainException('Lengkapi nama, email valid, peran admin/perawat, dan kata sandi minimal 10 karakter. Akun keluarga dibuat melalui pendaftaran pasien terpadu.');
                 }
                 $pdo->beginTransaction();
                 $pdo->prepare('INSERT INTO users(name,email,password_hash,role,status) VALUES(?,?,?,?,\'active\')')->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT), $newRole]);
@@ -119,13 +140,17 @@ function handle_post(): void
                 $email = strtolower(post_value('email'));
                 $password = (string)($_POST['password'] ?? '');
                 $newRole = post_value('role');
-                if ($id < 1 || $name === '' || text_length($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || !in_array($newRole, ['admin', 'nurse', 'family'], true) || ($password !== '' && strlen($password) < 10)) {
+                if ($id < 1 || $name === '' || text_length($name) > 120 || !filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190 || ($password !== '' && strlen($password) < 10)) {
                     throw new DomainException('Data pengguna tidak valid. Kata sandi baru harus minimal 10 karakter.');
                 }
                 $stmt = $pdo->prepare('SELECT id, role FROM users WHERE id=? LIMIT 1');
                 $stmt->execute([$id]);
                 $old = $stmt->fetch();
                 if (!$old) throw new DomainException('Pengguna tidak ditemukan.');
+                $allowedRoles = $old['role'] === 'family' ? ['admin', 'nurse', 'family'] : ['admin', 'nurse'];
+                if (!in_array($newRole, $allowedRoles, true)) {
+                    throw new DomainException('Akun keluarga baru hanya dapat dibuat bersamaan dengan pendaftaran pasien.');
+                }
                 if ($id === $userId && $newRole !== 'admin') throw new DomainException('Peran akun admin yang sedang digunakan tidak dapat diubah sendiri.');
                 if ($old['role'] === 'admin' && $newRole !== 'admin') {
                     $admins = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='admin' AND status='active'")->fetchColumn();
@@ -137,7 +162,19 @@ function handle_post(): void
                 } else {
                     $pdo->prepare('UPDATE users SET name=?, email=?, role=? WHERE id=?')->execute([$name, $email, $newRole, $id]);
                 }
-                sync_family_patients($id, $newRole, (array)($_POST['patient_ids'] ?? []));
+                if ($newRole === 'family') {
+                    if (array_key_exists('patient_ids', $_POST)) {
+                        sync_family_patients($id, $newRole, (array)$_POST['patient_ids']);
+                    } else {
+                        $linked = $pdo->prepare('SELECT COUNT(*) FROM patient_families WHERE user_id=?');
+                        $linked->execute([$id]);
+                        if ((int)$linked->fetchColumn() < 1) {
+                            throw new DomainException('Akun keluarga harus terhubung dengan minimal satu pasien.');
+                        }
+                    }
+                } else {
+                    sync_family_patients($id, $newRole, []);
+                }
                 $pdo->commit();
                 audit_log($userId, 'update', 'user', $id, ['email' => $email, 'role' => $newRole]);
                 flash('Data pengguna berhasil diperbarui.');
