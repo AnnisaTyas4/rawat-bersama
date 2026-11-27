@@ -153,7 +153,7 @@ if ($role === 'admin') {
     <meta name="theme-color" content="#132d3b">
     <title>RawatBersama · <?=e($pageTitles[$page] ?? 'Masuk')?></title>
     <link rel="stylesheet" href="assets/style.css?v=3">
-    <link rel="stylesheet" href="assets/admin.css?v=1">
+    <link rel="stylesheet" href="assets/admin.css?v=2">
 </head>
 <body class="<?=!$me ? 'login-body' : ''?>">
 <?php if (!$me): ?>
