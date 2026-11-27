@@ -32,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
       event.preventDefault();
       return;
     }
+    if (form.method.toLowerCase() !== 'post') return;
     const button = event.submitter || form.querySelector('button[type="submit"],button:not([type])');
     if (button && !button.dataset.keepLabel) {
       button.disabled = true;
