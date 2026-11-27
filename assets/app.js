@@ -26,7 +26,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
   window.addEventListener('resize', () => { if (window.innerWidth > 760) closeMenu(); });
   document.querySelectorAll('form').forEach(form => form.addEventListener('submit', event => {
-    if (!form.checkValidity()) return;
+    if (event.defaultPrevented || !form.checkValidity()) return;
+    const confirmation = form.dataset.confirm;
+    if (confirmation && !window.confirm(confirmation)) {
+      event.preventDefault();
+      return;
+    }
     const button = event.submitter || form.querySelector('button[type="submit"],button:not([type])');
     if (button && !button.dataset.keepLabel) {
       button.disabled = true;
