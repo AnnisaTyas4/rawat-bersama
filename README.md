@@ -3,7 +3,9 @@
 Aplikasi koordinasi perawatan pasien untuk administrator, perawat, dan keluarga. Teknologi: PHP Native, MySQL/MariaDB, HTML5, CSS3, dan JavaScript.
 
 ## Fitur
-- Dashboard ringkasan aktivitas perawatan.
+- Dashboard ringkasan aktivitas perawatan dengan tampilan sesuai peran.
+- Pencarian pasien global berdasarkan nama, diagnosis, kontak keluarga, atau ID; pencarian dan filter pada jadwal obat, kunjungan, pantauan kondisi, pesan, laporan, pengguna, dan riwayat aktivitas.
+- Profil pasien terpusat yang merangkum identitas, alergi, pantauan terakhir, kunjungan, jadwal obat, riwayat pantauan, dan laporan.
 - Role-based access: admin, nurse, family.
 - Keluarga hanya dapat melihat pasien yang ditautkan administrator ke akunnya.
 - Pendaftaran pasien terpadu: admin dan perawat dapat mendaftarkan pasien sekaligus membuat akun keluarga dan menghubungkannya dalam satu transaksi database. Jika proses pembuatan akun gagal, data pasien ikut dibatalkan.
