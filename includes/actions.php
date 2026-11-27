@@ -270,16 +270,39 @@ function handle_post(): void
                 $pdo->prepare('DELETE FROM reports WHERE id=?')->execute([$id]); audit_log($userId, 'delete', 'report', $id); flash('Laporan berhasil dihapus.'); redirect('reports');
             }
             case 'save_message': {
-                $id = post_id(); $patientId = post_id('patient_id'); $message = post_value('message');
-                if ($patientId < 1 || $message === '' || text_length($message) > 5000) throw new DomainException('Pilih pasien dan isi pesan (maksimal 5.000 karakter).');
-                assert_patient_access($patientId, $user);
+                $id = post_id();
+                $message = post_value('message');
+                if ($message === '' || text_length($message) > 5000) {
+                    throw new DomainException('Isi pesan wajib diisi (maksimal 5.000 karakter).');
+                }
                 if ($id > 0) {
                     $record = assert_record_editable('messages', $id, $user);
-                    $pdo->prepare('UPDATE messages SET patient_id=?,message=? WHERE id=?')->execute([$patientId,$message,$id]);
-                    audit_log($userId, 'update', 'message', $id); flash('Pesan berhasil diperbarui.');
+                    $pdo->prepare('UPDATE messages SET message=? WHERE id=?')->execute([$message, $id]);
+                    audit_log($userId, 'update', 'message', $id);
+                    flash('Pesan berhasil diperbarui.');
                 } else {
-                    $pdo->prepare('INSERT INTO messages(patient_id,sender_id,message) VALUES(?,?,?)')->execute([$patientId,$userId,$message]);
-                    $newId = (int)$pdo->lastInsertId(); audit_log($userId, 'create', 'message', $newId); flash('Pesan berhasil dikirim.');
+                    $replyToId = post_id('reply_to_id');
+                    if ($replyToId > 0) {
+                        $parentStmt = $pdo->prepare('SELECT id, patient_id FROM messages WHERE id=? LIMIT 1');
+                        $parentStmt->execute([$replyToId]);
+                        $parent = $parentStmt->fetch();
+                        if (!$parent) {
+                            throw new DomainException('Pesan yang ingin dibalas tidak ditemukan.');
+                        }
+                        $patientId = (int)$parent['patient_id'];
+                        assert_patient_access($patientId, $user);
+                    } else {
+                        $patientId = post_id('patient_id');
+                        if ($patientId < 1) {
+                            throw new DomainException('Pilih pasien terlebih dahulu.');
+                        }
+                        assert_patient_access($patientId, $user);
+                    }
+                    $pdo->prepare('INSERT INTO messages(patient_id,sender_id,message,reply_to_id) VALUES(?,?,?,?)')
+                        ->execute([$patientId, $userId, $message, $replyToId > 0 ? $replyToId : null]);
+                    $newId = (int)$pdo->lastInsertId();
+                    audit_log($userId, $replyToId > 0 ? 'reply' : 'create', 'message', $newId, $replyToId > 0 ? ['reply_to_id' => $replyToId] : []);
+                    flash($replyToId > 0 ? 'Balasan berhasil dikirim.' : 'Pesan berhasil dikirim.');
                 }
                 redirect('messages');
             }
