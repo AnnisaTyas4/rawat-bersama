@@ -79,10 +79,13 @@ CREATE TABLE IF NOT EXISTS messages (
  patient_id BIGINT UNSIGNED NOT NULL,
  sender_id BIGINT UNSIGNED NOT NULL,
  message TEXT NOT NULL,
+ reply_to_id BIGINT UNSIGNED NULL,
  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
  INDEX idx_messages_patient_time (patient_id,created_at),
+ INDEX idx_messages_reply_to (reply_to_id),
  CONSTRAINT fk_messages_patient FOREIGN KEY(patient_id) REFERENCES patients(id) ON DELETE CASCADE,
- CONSTRAINT fk_messages_sender FOREIGN KEY(sender_id) REFERENCES users(id)
+ CONSTRAINT fk_messages_sender FOREIGN KEY(sender_id) REFERENCES users(id),
+ CONSTRAINT fk_messages_reply_to FOREIGN KEY(reply_to_id) REFERENCES messages(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 CREATE TABLE IF NOT EXISTS reports (
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
