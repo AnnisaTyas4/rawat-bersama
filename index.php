@@ -71,7 +71,7 @@ $observations = [];
 $messages = [];
 $reports = [];
 $auditRows = [];
-$stats = ['patients'=>0,'nurses'=>0,'meds'=>0,'reports'=>0];
+$stats = ['patients'=>0,'nurses'=>0,'meds'=>0,'reports'=>0,'visitsToday'=>0,'observationsToday'=>0];
 $selectedPatient = null;
 $latestObservation = null;
 $recentVisits = [];
@@ -102,11 +102,13 @@ if ($me) {
             $latestObservation = $stmt->fetch() ?: null;
         }
         $stats['patients'] = count($activePatients);
-        $stats['meds'] = scoped_count('medications','patient_id',"AND status='pending'");
-        $stats['reports'] = scoped_count('reports','patient_id','AND report_date=CURDATE()');
+        $stats['meds'] = scoped_count('medications','patient_id',"AND medications.status='pending' AND EXISTS (SELECT 1 FROM patients p WHERE p.id=medications.patient_id AND p.status='active')");
+        $stats['reports'] = scoped_count('reports','patient_id',"AND report_date=CURDATE() AND EXISTS (SELECT 1 FROM patients p WHERE p.id=reports.patient_id AND p.status='active')");
+        $stats['visitsToday'] = scoped_count('visits','patient_id',"AND DATE(visit_at)=CURDATE() AND EXISTS (SELECT 1 FROM patients p WHERE p.id=visits.patient_id AND p.status='active')");
+        $stats['observationsToday'] = scoped_count('observations','patient_id',"AND DATE(recorded_at)=CURDATE() AND EXISTS (SELECT 1 FROM patients p WHERE p.id=observations.patient_id AND p.status='active')");
         if ($role === 'admin') $stats['nurses'] = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='nurse' AND status='active'")->fetchColumn();
-        $recentVisits = scoped_rows('SELECT v.*,p.name AS patient,u.name AS nurse FROM visits v INNER JOIN patients p ON p.id=v.patient_id INNER JOIN users u ON u.id=v.nurse_id','v.patient_id','ORDER BY v.visit_at DESC,v.id DESC LIMIT 5');
-        $reminders = scoped_rows("SELECT m.*,p.name AS patient FROM medications m INNER JOIN patients p ON p.id=m.patient_id",'m.patient_id',"AND m.status='pending' ORDER BY m.scheduled_time ASC,m.id DESC LIMIT 5");
+        $recentVisits = scoped_rows('SELECT v.*,p.name AS patient,u.name AS nurse FROM visits v INNER JOIN patients p ON p.id=v.patient_id INNER JOIN users u ON u.id=v.nurse_id','v.patient_id',"AND p.status='active' ORDER BY v.visit_at DESC,v.id DESC LIMIT 5");
+        $reminders = scoped_rows("SELECT m.*,p.name AS patient FROM medications m INNER JOIN patients p ON p.id=m.patient_id",'m.patient_id',"AND p.status='active' AND m.status='pending' ORDER BY m.scheduled_time ASC,m.id DESC LIMIT 5");
     }
 
     if ($page === 'patients') {
@@ -131,8 +133,9 @@ if ($me) {
     }
 }
 
+$roleDashboardTitle = $role === 'admin' ? 'Ringkasan Admin' : ($role === 'nurse' ? 'Ringkasan Perawat' : 'Ringkasan Keluarga');
 $pageTitles = [
-    'dashboard'=>'Ringkasan', 'patients'=>'Data pasien', 'users'=>'Manajemen pengguna',
+    'dashboard'=>$roleDashboardTitle, 'patients'=>'Data pasien', 'users'=>'Manajemen pengguna',
     'medications'=>'Jadwal obat', 'visits'=>'Kunjungan', 'observations'=>'Pantauan kondisi',
     'messages'=>'Pesan', 'reports'=>'Laporan harian', 'audit'=>'Riwayat aktivitas',
 ];
@@ -182,8 +185,8 @@ if ($role === 'admin') {
         </nav>
         <div class="sidebar-bottom">
             <div class="help-card"><b>Butuh bantuan?</b><p>Hubungi administrator sistem untuk bantuan akses.</p></div>
-            <div class="user-mini"><div class="avatar"><?=e(strtoupper(substr($me['name'],0,1)))?></div><div><b><?=e($me['name'])?></b><small><?=e(ucfirst($role))?></small></div>
-                <form method="post" class="logout-form"><?=csrf_input()?><input type="hidden" name="action" value="logout"><button type="submit" aria-label="Keluar" title="Keluar">↗</button></form>
+            <div class="user-mini"><div class="avatar"><?=e(strtoupper(substr($me['name'],0,1)))?></div><div><b><?=e($me['name'])?></b><small><?=e(['admin'=>'Administrator','nurse'=>'Perawat','family'=>'Keluarga'][$role] ?? 'Pengguna')?></small></div>
+                <form method="post" class="logout-form" data-confirm="Yakin ingin keluar dari akun RawatBersama? Anda perlu login kembali untuk mengakses data."><?=csrf_input()?><input type="hidden" name="action" value="logout"><button type="submit" aria-label="Keluar dari akun" title="Keluar">↗</button></form>
             </div>
         </div>
     </aside>
@@ -199,31 +202,73 @@ if ($role === 'admin') {
 
             <?php if ($page === 'dashboard'): ?>
                 <div class="welcome-row">
-                    <div><span class="eyebrow">OVERVIEW</span><h1>Selamat datang, <?=e(explode(' ', $me['name'])[0])?> 👋</h1><p>Berikut ringkasan aktivitas perawatan hari ini.</p></div>
-                    <?php if ($activePatients): ?><form method="get" class="patient-filter"><input type="hidden" name="page" value="dashboard"><label for="patient_id">Pilih pasien</label><select id="patient_id" name="patient_id" onchange="this.form.submit()"><?=patient_select_options($activePatients,(int)($selectedPatient['id'] ?? 0))?></select></form><?php endif; ?>
+                    <div>
+                        <span class="eyebrow"><?=e($role === 'admin' ? 'ADMINISTRATOR WORKSPACE' : ($role === 'nurse' ? 'NURSE WORKSPACE' : 'FAMILY PORTAL'))?></span>
+                        <h1><?=e($role === 'admin' ? 'Selamat datang, ' . explode(' ', $me['name'])[0] : ($role === 'nurse' ? 'Halo, ' . explode(' ', $me['name'])[0] : 'Halo, ' . explode(' ', $me['name'])[0]))?> 👋</h1>
+                        <p><?=e($role === 'admin' ? 'Pantau data pasien, tenaga perawat, jadwal obat, dan laporan layanan.' : ($role === 'nurse' ? 'Pantau pasien, kunjungan, catatan kondisi, dan jadwal obat yang perlu ditindaklanjuti.' : 'Pantau informasi pasien, jadwal obat, dan perkembangan perawatan keluarga Anda.'))?></p>
+                    </div>
+                    <?php if (count($activePatients) > 1): ?>
+                        <form method="get" class="patient-filter"><input type="hidden" name="page" value="dashboard"><label for="patient_id">Pilih pasien</label><select id="patient_id" name="patient_id" onchange="this.form.submit()"><?=patient_select_options($activePatients,(int)($selectedPatient['id'] ?? 0))?></select></form>
+                    <?php elseif ($selectedPatient): ?>
+                        <div class="selected-patient-pill"><span>Pasien yang ditampilkan</span><b><?=e($selectedPatient['name'])?></b></div>
+                    <?php endif; ?>
                 </div>
+
                 <div class="stat-grid">
-                    <article class="stat-card"><span>Pasien yang dapat diakses</span><strong><?=number_format($stats['patients'])?></strong><small>Pasien aktif</small></article>
-                    <?php if ($role === 'admin'): ?><article class="stat-card"><span>Perawat aktif</span><strong><?=number_format($stats['nurses'])?></strong><small>Pengguna perawat</small></article><?php endif; ?>
-                    <article class="stat-card"><span>Obat menunggu</span><strong><?=number_format($stats['meds'])?></strong><small>Belum ditandai diberikan</small></article>
-                    <article class="stat-card"><span>Laporan hari ini</span><strong><?=number_format($stats['reports'])?></strong><small>Laporan tersimpan</small></article>
+                    <?php if ($role === 'admin'): ?>
+                        <article class="stat-card"><span>Pasien aktif</span><strong><?=number_format($stats['patients'])?></strong><small>Data pasien yang sedang terdaftar</small></article>
+                        <article class="stat-card"><span>Perawat aktif</span><strong><?=number_format($stats['nurses'])?></strong><small>Akun perawat berstatus aktif</small></article>
+                        <article class="stat-card"><span>Obat menunggu</span><strong><?=number_format($stats['meds'])?></strong><small>Jadwal obat pasien aktif</small></article>
+                        <article class="stat-card"><span>Laporan hari ini</span><strong><?=number_format($stats['reports'])?></strong><small>Laporan perawatan tersimpan hari ini</small></article>
+                    <?php elseif ($role === 'nurse'): ?>
+                        <article class="stat-card"><span>Pasien aktif</span><strong><?=number_format($stats['patients'])?></strong><small>Pasien yang dapat Anda akses</small></article>
+                        <article class="stat-card"><span>Kunjungan hari ini</span><strong><?=number_format($stats['visitsToday'])?></strong><small>Kunjungan yang sudah dicatat</small></article>
+                        <article class="stat-card"><span>Pemantauan hari ini</span><strong><?=number_format($stats['observationsToday'])?></strong><small>Catatan kondisi yang dibuat</small></article>
+                        <article class="stat-card"><span>Obat menunggu</span><strong><?=number_format($stats['meds'])?></strong><small>Jadwal yang belum ditandai diberikan</small></article>
+                    <?php else: ?>
+                        <article class="stat-card"><span>Pasien terhubung</span><strong><?=number_format($stats['patients'])?></strong><small>Pasien yang ditautkan ke akun Anda</small></article>
+                        <article class="stat-card"><span>Obat menunggu</span><strong><?=number_format($stats['meds'])?></strong><small>Jadwal obat yang perlu diperhatikan</small></article>
+                        <article class="stat-card"><span>Kunjungan hari ini</span><strong><?=number_format($stats['visitsToday'])?></strong><small>Kunjungan tim perawat</small></article>
+                        <article class="stat-card"><span>Pembaruan kondisi hari ini</span><strong><?=number_format($stats['observationsToday'])?></strong><small>Catatan kondisi pasien terbaru</small></article>
+                    <?php endif; ?>
                 </div>
+
+                <div class="dashboard-shortcuts">
+                    <span class="eyebrow">AKSES CEPAT</span>
+                    <?php if ($role === 'admin'): ?>
+                        <a class="btn btn-outline" href="index.php?page=patients">Kelola pasien →</a>
+                        <a class="btn btn-outline" href="index.php?page=users">Kelola pengguna →</a>
+                        <a class="btn btn-outline" href="index.php?page=audit">Riwayat aktivitas →</a>
+                    <?php elseif ($role === 'nurse'): ?>
+                        <a class="btn btn-outline" href="index.php?page=visits">Catat kunjungan →</a>
+                        <a class="btn btn-outline" href="index.php?page=observations">Pantau kondisi →</a>
+                        <a class="btn btn-outline" href="index.php?page=medications">Jadwal obat →</a>
+                    <?php else: ?>
+                        <a class="btn btn-outline" href="index.php?page=messages">Hubungi perawat →</a>
+                        <a class="btn btn-outline" href="index.php?page=medications">Lihat jadwal obat →</a>
+                        <a class="btn btn-outline" href="index.php?page=reports">Lihat laporan →</a>
+                    <?php endif; ?>
+                </div>
+
                 <?php if ($selectedPatient): ?>
-                    <div class="section-title"><div><span class="eyebrow">PROFIL PASIEN</span><h3><?=e($selectedPatient['name'])?></h3><p><?=e($selectedPatient['age'])?> tahun · <?=e($selectedPatient['gender'])?> · <?=e($selectedPatient['diagnosis'] ?: 'Diagnosis belum diisi')?></p></div><a class="btn btn-outline" href="index.php?page=patients">Lihat pasien →</a></div>
+                    <div class="section-title"><div><span class="eyebrow"><?=e($role === 'family' ? 'INFORMASI PASIEN ANDA' : 'PROFIL PASIEN')?></span><h3><?=e($selectedPatient['name'])?></h3><p><?=e($selectedPatient['age'])?> tahun · <?=e($selectedPatient['gender'])?> · <?=e($selectedPatient['diagnosis'] ?: 'Diagnosis belum diisi')?></p></div><a class="btn btn-outline" href="index.php?page=patients"><?=e($role === 'admin' ? 'Kelola data pasien →' : 'Lihat daftar pasien →')?></a></div>
                     <div class="two-col">
-                        <article class="panel-card"><div class="panel-head"><h3>Pantauan terakhir</h3><span class="tag">Kondisi</span></div>
+                        <article class="panel-card"><div class="panel-head"><h3><?=e($role === 'family' ? 'Kondisi terakhir pasien' : 'Pantauan terakhir')?></h3><span class="tag">Kondisi</span></div>
                             <?php if ($latestObservation): ?><div class="vital-grid"><div><small>Tekanan darah</small><b><?=e($latestObservation['blood_pressure'] ?: '—')?></b><small>mmHg</small></div><div><small>Suhu tubuh</small><b><?=e($latestObservation['temperature'] ?: '—')?>°</b><small>Celsius</small></div><div><small>Ukuran luka</small><b><?=e($latestObservation['wound_size'] ?: '—')?></b><small>cm</small></div></div><p class="muted"><?=e($latestObservation['complaint'] ?: 'Tidak ada keluhan tercatat')?></p>
                             <?php else: ?><p class="empty">Belum ada data pemantauan untuk pasien ini.</p><?php endif; ?>
                         </article>
-                        <article class="panel-card"><div class="panel-head"><h3>Informasi penting</h3><span class="tag tag-warn">Perhatian</span></div><p><b>Alergi</b><br><?=e($selectedPatient['allergies'] ?? 'Belum dicatat')?></p><p><b>Alamat</b><br><?=e($selectedPatient['address'] ?? 'Belum dicatat')?></p><p><b>Kontak keluarga</b><br><?=e($selectedPatient['family_contact'] ?? 'Belum dicatat')?></p></article>
+                        <article class="panel-card"><div class="panel-head"><h3>Informasi penting</h3><span class="tag tag-warn">Perhatian</span></div><p><b>Alergi</b><br><?=e($selectedPatient['allergies'] ?? 'Belum dicatat')?></p><p><b>Alamat</b><br><?=e($selectedPatient['address'] ?? 'Belum dicatat')?></p><?php if ($role !== 'family'): ?><p><b>Kontak keluarga</b><br><?=e($selectedPatient['family_contact'] ?? 'Belum dicatat')?></p><?php endif; ?></article>
                     </div>
-                <?php else: ?><div class="panel-card empty">Belum ada pasien yang terhubung dengan akun ini. Hubungi administrator untuk mengatur akses pasien.</div><?php endif; ?>
+                <?php else: ?>
+                    <div class="panel-card empty"><?=e($role === 'admin' ? 'Belum ada pasien aktif. Tambahkan data pasien untuk mulai mengelola perawatan.' : ($role === 'nurse' ? 'Belum ada pasien aktif yang tersedia untuk dipantau.' : 'Belum ada pasien yang terhubung dengan akun ini. Hubungi administrator untuk mengatur akses pasien.'))?></div>
+                <?php endif; ?>
+
                 <div class="two-col">
-                    <article class="panel-card"><div class="panel-head"><h3>Aktivitas kunjungan terbaru</h3><a href="index.php?page=visits">Lihat semua</a></div>
+                    <article class="panel-card"><div class="panel-head"><h3><?=e($role === 'family' ? 'Aktivitas perawatan terbaru' : 'Kunjungan terbaru')?></h3><a href="index.php?page=visits">Lihat semua</a></div>
                         <?php foreach ($recentVisits as $visit): ?><div class="activity"><span class="activity-dot"></span><div><b><?=e($visit['nurse'])?></b> · kunjungan <?=e($visit['patient'])?><p><?=e($visit['notes'])?></p><small><?=e($visit['visit_at'])?></small></div></div><?php endforeach; ?>
                         <?php if (!$recentVisits): ?><p class="empty">Belum ada aktivitas kunjungan.</p><?php endif; ?>
                     </article>
-                    <article class="panel-card"><div class="panel-head"><h3>Pengingat obat</h3><a href="index.php?page=medications">Jadwal obat</a></div>
+                    <article class="panel-card"><div class="panel-head"><h3><?=e($role === 'family' ? 'Jadwal obat pasien' : 'Pengingat obat')?></h3><a href="index.php?page=medications">Jadwal obat</a></div>
                         <?php foreach ($reminders as $med): ?><div class="reminder"><span class="time-pill"><?=e(substr($med['scheduled_time'],0,5))?></span><div><b><?=e($med['name'])?></b><small><?=e($med['patient'])?> · <?=e($med['dose'])?></small></div><span class="tag tag-warn">Menunggu</span></div><?php endforeach; ?>
                         <?php if (!$reminders): ?><p class="empty">Tidak ada obat tertunda.</p><?php endif; ?>
                     </article>
