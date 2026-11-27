@@ -38,6 +38,9 @@ Jika database versi awal sudah berisi tabel users, patients, medications, visits
 ## Upgrade fitur balasan pesan
 Jika database sudah menjalankan migrasi 001, backup database lalu jalankan `database/migrations/002_message_replies.sql` satu kali melalui phpMyAdmin. Migrasi ini menambahkan relasi balasan pada tabel `messages` tanpa menghapus pesan lama. Untuk instalasi baru, kolom balasan sudah termasuk dalam `database/rawat_bersama.sql`.
 
+## Upgrade pendaftaran pasien terpadu
+Pembaruan pendaftaran pasien dan akun keluarga terpadu tidak menambah atau mengubah struktur tabel. Jika database sudah menggunakan migrasi 001 (akses keluarga/audit log) dan migrasi 002 (balasan pesan), cukup perbarui source code dari branch `main`. Jangan impor ulang SQL dan tidak perlu menjalankan migrasi tambahan.
+
 ## Hak akses
 - **Admin:** semua pasien, pengguna, audit log, seluruh CRUD, pengarsipan dan pemulihan.
 - **Perawat:** melihat pasien aktif, mendaftarkan pasien baru beserta akun keluarga, mencatat/mengedit data perawatan yang dibuat sendiri, mengelola jadwal obat dan pesan; pengeditan/arsip data identitas pasien serta penghapusan catatan dibatasi untuk admin.
