@@ -1,28 +1,48 @@
 # RawatBersama
 
-Aplikasi koordinasi perawatan pasien untuk keluarga, perawat, dan administrator. Dibangun dengan PHP Native, MySQL, HTML, CSS, dan JavaScript.
+Aplikasi koordinasi perawatan pasien untuk administrator, perawat, dan keluarga. Teknologi: PHP Native, MySQL/MariaDB, HTML5, CSS3, dan JavaScript.
 
 ## Fitur
-- Login berbasis peran: admin, perawat, keluarga.
-- Dashboard admin dengan statistik pasien, perawat, jadwal obat, dan laporan.
-- Manajemen pasien dan pengguna.
-- Jadwal obat dan pencatatan status pemberian.
-- Catatan kunjungan dan pemantauan kondisi.
-- Pesan keluarga/perawat.
-- Laporan harian pasien.
-- Layout responsif untuk desktop dan mobile.
-- Query database menggunakan PDO prepared statements, password hashing, dan token CSRF.
-
-## Instalasi XAMPP
-1. Clone/download repository ke folder `htdocs/rawat-bersama`.
-2. Impor `database/rawat_bersama.sql` melalui phpMyAdmin.
-3. Salin `config.example.php` menjadi `config.php`, lalu sesuaikan kredensial database.
-4. Buka `http://localhost/rawat-bersama/setup_admin.php` dan buat admin (password minimal 10 karakter).
-5. Hapus `setup_admin.php` setelah admin berhasil dibuat.
-6. Masuk melalui `http://localhost/rawat-bersama/`.
+- Dashboard ringkasan aktivitas perawatan.
+- Role-based access: admin, nurse, family.
+- Keluarga hanya dapat melihat pasien yang ditautkan administrator ke akunnya.
+- Manajemen pasien: tambah, edit, arsipkan, dan pulihkan.
+- Manajemen pengguna: tambah, edit, ganti kata sandi/peran, tautkan pasien keluarga, nonaktifkan, dan aktifkan kembali.
+- Jadwal obat: tambah, edit, ubah status diberikan/menunggu, dan hapus (admin).
+- Kunjungan dan pantauan kondisi: tambah, edit data milik sendiri (atau seluruh data oleh admin), hapus (admin).
+- Pesan: kirim, edit/hapus pesan milik sendiri; admin dapat mengelola semua pesan.
+- Laporan: tambah, edit laporan sendiri; admin dapat mengelola dan menghapus semua laporan.
+- Riwayat aktivitas admin untuk mencatat login, tambah, perubahan, arsip, status, dan penghapusan.
+- Validasi server, PDO prepared statements, CSRF token, password hashing, session cookie HttpOnly/SameSite.
+- Layout responsif desktop, tablet, dan ponsel.
 
 ## Persyaratan
-PHP 8.1+ dengan PDO MySQL, MySQL 5.7+/MariaDB 10.4+, Apache/Nginx.
+- PHP 8.1+ (PDO MySQL; ekstensi mbstring opsional).
+- MySQL 5.7+ atau MariaDB 10.4+.
+- Apache dengan AllowOverride jika memakai aturan .htaccess.
 
-## Catatan keamanan
-File `config.php` tidak disertakan agar kredensial tidak masuk Git. Buat akun perawat/keluarga melalui Manajemen pengguna. Untuk penggunaan klinis/produksi, tambahkan pembatasan akses per pasien, audit log immutable, backup terenkripsi, kebijakan retensi, HTTPS, serta peninjauan keamanan dan alur klinis. Aplikasi ini bukan alat diagnosis.
+## Instalasi baru dengan XAMPP
+1. Salin/clone repository ke htdocs/rawat-bersama.
+2. Jalankan Apache dan MySQL.
+3. Buka phpMyAdmin dan impor database/rawat_bersama.sql.
+4. Salin config.example.php menjadi config.php, lalu sesuaikan host, nama database, username, dan password.
+5. Buka http://localhost/rawat-bersama/setup_admin.php untuk membuat akun admin pertama (password minimal 10 karakter).
+6. Setelah akun admin berhasil dibuat, hapus setup_admin.php dari server.
+7. Login di http://localhost/rawat-bersama/.
+8. Dari menu Manajemen pengguna, buat akun perawat/keluarga. Saat membuat akun keluarga, pilih pasien yang boleh diakses.
+
+## Upgrade dari database versi awal
+Jika database versi awal sudah berisi tabel users, patients, medications, visits, observations, messages, dan reports, jangan impor ulang rawat_bersama.sql. Backup database, lalu jalankan satu kali database/migrations/001_access_control_and_audit.sql melalui phpMyAdmin. Migrasi menambahkan status arsip pasien, relasi keluarga-pasien, dan audit log.
+
+## Hak akses
+- **Admin:** semua pasien, pengguna, audit log, seluruh CRUD, pengarsipan dan pemulihan.
+- **Perawat:** melihat pasien aktif, mencatat/mengedit data perawatan yang dibuat sendiri, mengelola jadwal obat dan pesan; penghapusan catatan dibatasi untuk admin.
+- **Keluarga:** hanya membaca data pasien yang ditautkan admin, melihat informasi perawatan, dan mengirim/mengelola pesan miliknya sendiri.
+
+Penghapusan pasien dan pengguna dilakukan dengan arsip/nonaktif agar rekam jejak perawatan dan relasi historis tetap terjaga. Penghapusan catatan perawatan dilakukan secara permanen dan dicatat dalam audit log.
+
+## Catatan keamanan dan penggunaan
+- Jangan commit config.php atau kredensial database ke GitHub.
+- Gunakan HTTPS pada hosting publik dan backup database secara rutin.
+- Batasi akses akun admin; audit log bukan pengganti backup atau audit keamanan independen.
+- Sebelum dipakai untuk data pasien nyata, lakukan uji akses tiap role, peninjauan keamanan, kebijakan privasi/retensi, dan validasi alur klinis oleh tenaga kesehatan. Aplikasi ini merupakan alat dokumentasi dan koordinasi, bukan alat diagnosis atau pemberi keputusan medis.
