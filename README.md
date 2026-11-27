@@ -6,8 +6,9 @@ Aplikasi koordinasi perawatan pasien untuk administrator, perawat, dan keluarga.
 - Dashboard ringkasan aktivitas perawatan.
 - Role-based access: admin, nurse, family.
 - Keluarga hanya dapat melihat pasien yang ditautkan administrator ke akunnya.
-- Manajemen pasien: tambah, edit, arsipkan, dan pulihkan.
-- Manajemen pengguna: tambah, edit, ganti kata sandi/peran, tautkan pasien keluarga, nonaktifkan, dan aktifkan kembali.
+- Pendaftaran pasien terpadu: admin dan perawat dapat mendaftarkan pasien sekaligus membuat akun keluarga dan menghubungkannya dalam satu transaksi database. Jika proses pembuatan akun gagal, data pasien ikut dibatalkan.
+- Manajemen pasien: admin dapat mengedit, mengarsipkan, dan memulihkan pasien; perawat dapat mendaftarkan pasien baru.
+- Manajemen pengguna: admin dapat membuat/mengelola akun admin dan perawat, mengubah kata sandi/peran, serta menonaktifkan atau mengaktifkan kembali akun. Akun keluarga baru wajib dibuat melalui pendaftaran pasien terpadu.
 - Jadwal obat: tambah, edit, ubah status diberikan/menunggu, dan hapus (admin).
 - Kunjungan dan pantauan kondisi: tambah, edit data milik sendiri (atau seluruh data oleh admin), hapus (admin).
 - Pesan: kirim pesan baru, balas pesan tertentu dengan kutipan konteks, tampilkan riwayat percakapan kronologis, edit/hapus pesan milik sendiri; admin dapat mengelola semua pesan.
@@ -29,7 +30,7 @@ Aplikasi koordinasi perawatan pasien untuk administrator, perawat, dan keluarga.
 5. Buka http://localhost/rawat-bersama/setup_admin.php untuk membuat akun admin pertama (password minimal 10 karakter).
 6. Setelah akun admin berhasil dibuat, hapus setup_admin.php dari server.
 7. Login di http://localhost/rawat-bersama/.
-8. Dari menu Manajemen pengguna, buat akun perawat/keluarga. Saat membuat akun keluarga, pilih pasien yang boleh diakses.
+8. Dari menu Manajemen pengguna, buat akun admin/perawat. Untuk mendaftarkan pasien, buka Data Pasien lalu pilih **Daftarkan pasien + akun keluarga**. Isi identitas pasien dan data login keluarga dalam formulir yang sama.
 
 ## Upgrade dari database versi awal
 Jika database versi awal sudah berisi tabel users, patients, medications, visits, observations, messages, dan reports, jangan impor ulang rawat_bersama.sql. Backup database, lalu jalankan satu kali database/migrations/001_access_control_and_audit.sql melalui phpMyAdmin. Migrasi menambahkan status arsip pasien, relasi keluarga-pasien, dan audit log.
@@ -39,8 +40,8 @@ Jika database sudah menjalankan migrasi 001, backup database lalu jalankan `data
 
 ## Hak akses
 - **Admin:** semua pasien, pengguna, audit log, seluruh CRUD, pengarsipan dan pemulihan.
-- **Perawat:** melihat pasien aktif, mencatat/mengedit data perawatan yang dibuat sendiri, mengelola jadwal obat dan pesan; penghapusan catatan dibatasi untuk admin.
-- **Keluarga:** hanya membaca data pasien yang ditautkan admin, melihat informasi perawatan, dan mengirim/mengelola pesan miliknya sendiri.
+- **Perawat:** melihat pasien aktif, mendaftarkan pasien baru beserta akun keluarga, mencatat/mengedit data perawatan yang dibuat sendiri, mengelola jadwal obat dan pesan; pengeditan/arsip data identitas pasien serta penghapusan catatan dibatasi untuk admin.
+- **Keluarga:** hanya membaca data pasien yang otomatis ditautkan saat pendaftaran, melihat informasi perawatan, dan mengirim/mengelola pesan miliknya sendiri.
 
 Penghapusan pasien dan pengguna dilakukan dengan arsip/nonaktif agar rekam jejak perawatan dan relasi historis tetap terjaga. Penghapusan catatan perawatan dilakukan secara permanen dan dicatat dalam audit log.
 
