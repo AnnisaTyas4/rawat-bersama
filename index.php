@@ -156,7 +156,7 @@ if ($role === 'admin') {
     <meta name="theme-color" content="#132d3b">
     <title>RawatBersama · <?=e($pageTitles[$page] ?? 'Masuk')?></title>
     <link rel="stylesheet" href="assets/style.css?v=4">
-    <link rel="stylesheet" href="assets/admin.css?v=2">
+    <link rel="stylesheet" href="assets/admin.css?v=3">
 </head>
 <body class="<?=!$me ? 'login-body' : ''?>">
 <?php if (!$me): ?>
@@ -275,12 +275,44 @@ if ($role === 'admin') {
                 </div>
 
             <?php elseif ($page === 'patients'): ?>
-                <?php page_heading('Data pasien', $role === 'admin' ? 'Tambah, perbarui, dan arsipkan data pasien.' : 'Daftar pasien yang dapat Anda akses.'); ?>
-                <?php if ($role === 'admin'): ?>
-                    <details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Tambah pasien</summary>
-                        <form method="post" class="form-panel"><?=form_hidden('save_patient','patients')?>
-                            <div class="form-grid"><label>Nama lengkap<input name="name" maxlength="150" required></label><label>Usia<input type="number" name="age" min="0" max="120" required></label><label>Jenis kelamin<select name="gender" required><option value="Perempuan">Perempuan</option><option value="Laki-laki">Laki-laki</option><option value="Lainnya">Lainnya</option></select></label><label>Diagnosis<input name="diagnosis" maxlength="2000"></label><label>Alergi<input name="allergies" maxlength="2000"></label><label>Kontak keluarga<input name="family_contact" maxlength="100"></label><label class="span-2">Alamat<textarea name="address" rows="2"></textarea></label></div>
-                            <button class="btn btn-primary" type="submit">Simpan pasien</button>
+                <?php page_heading('Data pasien', $role === 'admin' ? 'Daftarkan pasien beserta akun keluarga dalam satu proses, lalu kelola data pasien.' : ($role === 'nurse' ? 'Daftarkan pasien baru sekaligus buatkan akun keluarga.' : 'Daftar pasien yang terhubung dengan akun keluarga Anda.')); ?>
+                <?php if (in_array($role, ['admin','nurse'], true)): ?>
+                    <details class="panel-card form-disclosure registration-disclosure">
+                        <summary class="btn btn-primary">＋ Daftarkan pasien + akun keluarga</summary>
+                        <form method="post" class="form-panel registration-form" autocomplete="off">
+                            <?=form_hidden('save_patient','patients')?>
+                            <section class="registration-section">
+                                <div class="registration-section-head">
+                                    <span class="registration-step">01</span>
+                                    <div><h3>Informasi pasien</h3><p>Isi identitas dan informasi dasar pasien yang akan didaftarkan.</p></div>
+                                </div>
+                                <div class="form-grid">
+                                    <label>Nama lengkap pasien<input name="name" maxlength="150" placeholder="Nama sesuai identitas" required></label>
+                                    <label>Usia (tahun)<input type="number" name="age" min="0" max="120" placeholder="Contoh: 45" required></label>
+                                    <label>Jenis kelamin<select name="gender" required><option value="">Pilih jenis kelamin</option><option value="Perempuan">Perempuan</option><option value="Laki-laki">Laki-laki</option><option value="Lainnya">Lainnya</option></select></label>
+                                    <label>Diagnosis<input name="diagnosis" maxlength="2000" placeholder="Diagnosis atau kondisi pasien"></label>
+                                    <label>Alergi<input name="allergies" maxlength="2000" placeholder="Tuliskan alergi, jika ada"></label>
+                                    <label>Kontak keluarga<input name="family_contact" maxlength="100" placeholder="Nomor telepon keluarga (opsional)"></label>
+                                    <label class="span-2">Alamat pasien<textarea name="address" rows="2" placeholder="Alamat lengkap (opsional)"></textarea></label>
+                                </div>
+                            </section>
+                            <section class="registration-section">
+                                <div class="registration-section-head">
+                                    <span class="registration-step">02</span>
+                                    <div><h3>Buat akun keluarga</h3><p>Akun ini langsung dihubungkan dengan pasien di atas. Keluarga akan menggunakan email dan kata sandi untuk masuk.</p></div>
+                                </div>
+                                <div class="form-grid">
+                                    <label>Nama anggota keluarga<input name="family_name" maxlength="120" placeholder="Nama lengkap anggota keluarga" autocomplete="name" required></label>
+                                    <label>Email untuk login<input type="email" name="family_email" maxlength="190" placeholder="keluarga@email.com" autocomplete="email" required></label>
+                                    <label>Kata sandi awal (minimal 10 karakter)<input type="password" name="family_password" minlength="10" maxlength="200" autocomplete="new-password" placeholder="Buat kata sandi awal" required></label>
+                                    <label>Ulangi kata sandi<input type="password" name="family_password_confirm" minlength="10" maxlength="200" autocomplete="new-password" placeholder="Ulangi kata sandi" required></label>
+                                </div>
+                                <p class="registration-note"><span>✓</span> Akun keluarga akan dibuat otomatis dengan peran Keluarga dan hanya dapat mengakses pasien yang didaftarkan pada formulir ini.</p>
+                            </section>
+                            <div class="registration-submit">
+                                <button class="btn btn-primary" type="submit">Simpan pasien & buat akun keluarga</button>
+                                <small class="field-help">Pastikan email belum terdaftar dan data sudah benar sebelum menyimpan.</small>
+                            </div>
                         </form>
                     </details>
                 <?php endif; ?>
@@ -293,14 +325,14 @@ if ($role === 'admin') {
                 </tbody></table></div><?php if (!$patientRows): ?><p class="empty">Belum ada pasien yang dapat ditampilkan.</p><?php endif; ?></div>
 
             <?php elseif ($page === 'users' && $role === 'admin'): ?>
-                <?php page_heading('Manajemen pengguna','Kelola akun, peran, status, dan hubungan akun keluarga dengan pasien.'); ?>
+                <?php page_heading('Manajemen pengguna','Kelola akun administrator dan perawat. Akun keluarga dibuat otomatis saat pendaftaran pasien.'); ?>
                 <details class="panel-card form-disclosure"><summary class="btn btn-primary">＋ Tambah pengguna</summary><form method="post" class="form-panel"><?=form_hidden('save_user','users')?>
-                    <div class="form-grid"><label>Nama lengkap<input name="name" maxlength="120" required></label><label>Email<input type="email" name="email" maxlength="190" required></label><label>Kata sandi awal (min. 10 karakter)<input type="password" name="password" minlength="10" required></label><label>Peran<select name="role"><option value="nurse">Perawat</option><option value="family">Keluarga</option><option value="admin">Admin</option></select></label><label class="span-2">Pasien untuk akun keluarga <select name="patient_ids[]" multiple size="4"><?php foreach ($activePatients as $patient): ?><option value="<?=e($patient['id'])?>"><?=e($patient['name'])?></option><?php endforeach; ?></select><small class="field-help">Pilih satu atau beberapa pasien. Pilihan ini digunakan jika peran akun adalah Keluarga.</small></label></div><button class="btn btn-primary" type="submit">Buat akun</button>
+                    <div class="form-grid"><label>Nama lengkap<input name="name" maxlength="120" required></label><label>Email<input type="email" name="email" maxlength="190" required></label><label>Kata sandi awal (min. 10 karakter)<input type="password" name="password" minlength="10" required></label><label>Peran<select name="role" required><option value="nurse">Perawat</option><option value="admin">Admin</option></select></label></div><p class="field-help">Untuk membuat akun keluarga, gunakan formulir pendaftaran pasien agar akun langsung terhubung dengan pasien.</p><button class="btn btn-primary" type="submit">Buat akun</button>
                 </form></details>
                 <div class="panel-card table-card"><div class="table-wrap"><table><thead><tr><th>Nama pengguna</th><th>Email</th><th>Peran</th><th>Pasien terhubung</th><th>Status</th><th>Aksi</th></tr></thead><tbody>
                     <?php foreach ($users as $account): $assigned = $patientAssignments[(int)$account['id']] ?? []; $assignedNames = array_values(array_map(static fn($p) => $p['name'], array_filter($activePatients, static fn($p) => in_array((int)$p['id'], $assigned, true)))); ?>
                     <tr><td><b><?=e($account['name'])?></b><small>ID #<?=e($account['id'])?></small></td><td><?=e($account['email'])?></td><td><?=e(ucfirst($account['role']))?></td><td><?=e($assignedNames ? implode(', ', $assignedNames) : '—')?></td><td><span class="tag <?=$account['status']==='active'?'tag-green':'tag-warn'?>"><?=e($account['status']==='active'?'Aktif':'Nonaktif')?></span></td><td class="actions-cell">
-                        <details class="row-details"><summary class="btn btn-sm">Edit</summary><form method="post" class="form-panel row-form"><?=form_hidden('update_user','users')?><input type="hidden" name="id" value="<?=e($account['id'])?>"><div class="form-grid"><label>Nama<input name="name" value="<?=e($account['name'])?>" required></label><label>Email<input type="email" name="email" value="<?=e($account['email'])?>" required></label><label>Kata sandi baru (kosongkan jika tetap)<input type="password" name="password" minlength="10"></label><label>Peran<select name="role"><option value="admin" <?=$account['role']==='admin'?'selected':''?>>Admin</option><option value="nurse" <?=$account['role']==='nurse'?'selected':''?>>Perawat</option><option value="family" <?=$account['role']==='family'?'selected':''?>>Keluarga</option></select></label><label class="span-2">Pasien untuk akun keluarga <select name="patient_ids[]" multiple size="4"><?php foreach ($activePatients as $patient): ?><option value="<?=e($patient['id'])?>" <?=in_array((int)$patient['id'],$assigned,true)?'selected':''?>><?=e($patient['name'])?></option><?php endforeach; ?></select><small class="field-help">Penugasan hanya berlaku jika peran pengguna adalah Keluarga.</small></label></div><button class="btn btn-primary" type="submit">Simpan pengguna</button></form></details>
+                        <details class="row-details"><summary class="btn btn-sm">Edit</summary><form method="post" class="form-panel row-form"><?=form_hidden('update_user','users')?><input type="hidden" name="id" value="<?=e($account['id'])?>"><div class="form-grid"><label>Nama<input name="name" value="<?=e($account['name'])?>" required></label><label>Email<input type="email" name="email" value="<?=e($account['email'])?>" required></label><label>Kata sandi baru (kosongkan jika tetap)<input type="password" name="password" minlength="10"></label><label>Peran<select name="role"><option value="admin" <?=$account['role']==='admin'?'selected':''?>>Admin</option><option value="nurse" <?=$account['role']==='nurse'?'selected':''?>>Perawat</option><?php if ($account['role']==='family'): ?><option value="family" selected>Keluarga</option><?php endif; ?></select></label><?php if ($account['role']==='family'): ?><label class="span-2">Pasien untuk akun keluarga <select name="patient_ids[]" multiple size="4"><?php foreach ($activePatients as $patient): ?><option value="<?=e($patient['id'])?>" <?=in_array((int)$patient['id'],$assigned,true)?'selected':''?>><?=e($patient['name'])?></option><?php endforeach; ?></select><small class="field-help">Pilih minimal satu pasien aktif yang boleh diakses akun ini.</small></label><?php endif; ?></div><button class="btn btn-primary" type="submit">Simpan pengguna</button></form></details>
                         <?php if ((int)$account['id'] !== (int)$me['id']): ?><form method="post" class="inline-action" onsubmit="return confirm('<?= $account['status']==='active' ? 'Nonaktifkan akun ini? Riwayat tetap disimpan.' : 'Aktifkan kembali akun ini?' ?>')"><?=form_hidden('set_user_status','users')?><input type="hidden" name="id" value="<?=e($account['id'])?>"><input type="hidden" name="status" value="<?=$account['status']==='active'?'inactive':'active'?>"><button class="btn btn-sm" type="submit"><?=$account['status']==='active'?'Nonaktifkan':'Aktifkan'?></button></form><?php endif; ?>
                     </td></tr><?php endforeach; ?>
                 </tbody></table></div><?php if (!$users): ?><p class="empty">Belum ada pengguna.</p><?php endif; ?></div>
