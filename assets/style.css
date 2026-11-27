@@ -82,3 +82,21 @@ input,select,textarea,button{max-width:100%}
 .topbar h2{max-width:175px}
 .section-title .btn{width:100%;justify-content:center}
 }
+
+/* Sidebar scrolling: keep all navigation and account actions reachable */
+.sidebar{
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior-y:contain;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(190,214,220,.38) transparent;
+  -webkit-overflow-scrolling:touch;
+}
+.sidebar::-webkit-scrollbar{width:6px}
+.sidebar::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb{background:rgba(190,214,220,.38);border-radius:20px}
+.sidebar>*{flex-shrink:0}
+.sidebar-bottom{margin-top:auto;padding-bottom:8px}
+@media(max-width:760px){
+  .sidebar{height:100dvh;max-height:100vh;overflow-y:auto;overscroll-behavior-y:contain}
+}
