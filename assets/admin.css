@@ -62,3 +62,22 @@ button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,s
  .message-actions{gap:6px}
  .message-actions .row-details[open]{min-width:min(280px,82vw);max-width:calc(100vw - 55px)}
 }
+
+/* One-flow patient and family registration */
+.registration-disclosure{padding:18px 20px}
+.registration-form{padding-top:8px}
+.registration-section+.registration-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--line)}
+.registration-section-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:15px}
+.registration-step{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;border-radius:9px;background:#e8f5f3;color:#137c78;font-size:12px;font-weight:800}
+.registration-section-head h3{margin:1px 0 4px;color:var(--ink);font-size:14px}
+.registration-section-head p{margin:0;color:var(--muted);font-size:11px;line-height:1.55}
+.registration-note{display:flex;align-items:flex-start;gap:8px;margin:14px 0 0;padding:11px 13px;border:1px solid #d9eee5;border-radius:9px;background:#f1faf5;color:#376b52;font-size:11px;line-height:1.55}
+.registration-note span{font-weight:900;color:#23865b}
+.registration-submit{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:20px}
+.registration-submit .field-help{max-width:360px}
+@media(max-width:760px){
+ .registration-disclosure{padding:14px}
+ .registration-section+.registration-section{margin-top:18px;padding-top:17px}
+ .registration-submit{align-items:stretch;flex-direction:column}
+ .registration-submit .btn{width:100%;justify-content:center}
+}
